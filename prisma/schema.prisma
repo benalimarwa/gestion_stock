@@ -1,0 +1,336 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-1.1.x"]
+  seed          = "ts-node prisma/seed.ts"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String         @id @default(uuid())
+  clerkUserId       String?        @unique
+  email             String         @unique
+  name              String?
+  role              Role
+  status            UserStatus     @default(ACTIVE)
+  previousRole      Role?    
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  firstName         String?
+  lastName          String?
+  adminAchat        AdminAchat?
+  validatedCommands Commande[]     @relation("ValidatedByAdmin")
+  passedCommands    Commande[]     @relation("PassedByGestionnaire")
+  receivedCommands  Commande[]     @relation("ReceivedByMagasinier")
+  requestedCommands Commande[]     @relation("RequestedByMagasinier")
+  approvedDemandes  Demande[]      @relation("ApprovedByAdmin")
+  demandeur         Demandeur?
+  gestionnaire      Gestionnaire?
+  magasinier        Magasinier?
+  notifications     Notification[]
+  registreActions   Registre[]     @relation("PerformedByUser")
+}
+
+enum UserStatus {
+  ACTIVE
+  DEACTIVATED
+}
+
+model Demandeur {
+  id                      String                  @id @default(uuid())
+  userId                  String                  @unique
+  type                    DemandeurType
+  createdAt               DateTime                @default(now())
+  updatedAt               DateTime                @updatedAt
+  demandes                Demande[]
+  demandesExceptionnelles DemandeExceptionnelle[]
+  user                    User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AdminAchat {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Gestionnaire {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Magasinier {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Categorie {
+  id          String    @id @default(uuid())
+  nom         String
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  produits    Produit[]
+}
+
+model Produit {
+  id                String               @id @default(uuid())
+  nom               String
+  quantite          Int
+  categorieId       String
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  marque            String               @default("Inconnu")
+  quantiteMinimale  Int                  @default(0)
+  remarque          String?
+  statut            StatutProduit        @default(NORMALE)
+  critere           ProduitCritere       @default(DURABLE)
+  alertes           Alerte[]
+  commandesProduits CommandeProduit[]
+  demandesProduits  DemandeProduit[]
+  categorie         Categorie            @relation(fields: [categorieId], references: [id])
+  fournisseurs      ProduitFournisseur[]
+  registreProduits  RegistreProduit[]    @relation("RegistreProduit")
+}
+
+model Fournisseur {
+  id        String               @id @default(uuid())
+  nom       String
+  contact   String
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  score     Float?
+  commandes Commande[]
+  produits  ProduitFournisseur[]
+  demandesExceptionnelles DemandeExceptionnelle[]
+} 
+
+model ProduitFournisseur {
+  id            String      @id @default(uuid())
+  produitId     String
+  fournisseurId String
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  fournisseur   Fournisseur @relation(fields: [fournisseurId], references: [id])
+  produit       Produit     @relation(fields: [produitId], references: [id])
+}
+
+model Commande {
+  id                    String            @id @default(uuid())
+  fournisseurId         String
+  date                  DateTime
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  statut                StatutCommande
+  datePrevu             DateTime?
+  facture               String?
+  dateLivraison         DateTime?
+  adminId               String?
+  gestionnaireId        String?
+  magasinierReceivedId  String?
+  magasinierRequestedId String?
+  raisonRetour          String?
+  admin                 User?             @relation("ValidatedByAdmin", fields: [adminId], references: [id])
+  fournisseur           Fournisseur       @relation(fields: [fournisseurId], references: [id])
+  gestionnaire          User?             @relation("PassedByGestionnaire", fields: [gestionnaireId], references: [id])
+  magasinierReceived    User?             @relation("ReceivedByMagasinier", fields: [magasinierReceivedId], references: [id])
+  magasinierRequested   User?             @relation("RequestedByMagasinier", fields: [magasinierRequestedId], references: [id])
+  produits              CommandeProduit[]
+}
+
+model CommandeProduit {
+  id         String   @id @default(uuid())
+  commandeId String
+  produitId  String
+  quantite   Int
+  reordered  Boolean  @default(false)
+  commande   Commande @relation(fields: [commandeId], references: [id], onDelete: Cascade)
+  produit    Produit  @relation(fields: [produitId], references: [id])
+}
+
+model Alerte {
+  id          String   @id @default(uuid())
+  produitId   String?
+  typeAlerte  String
+  date        DateTime
+  description String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  produit     Produit? @relation(fields: [produitId], references: [id])
+}
+
+model Notification {
+  id          String   @id @default(uuid())
+  message     String
+  dateEnvoi   DateTime @default(now())
+  typeEnvoi   String   @default("EMAIL")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  userId      String
+  isRead      Boolean  @default(false)
+  sentByEmail Boolean  @default(false)
+  utilisateur User     @relation(fields: [userId], references: [id])
+}
+
+model Reporting {
+  id        String   @id @default(uuid())
+  type      String
+  date      DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Demande {
+  id            String           @id @default(uuid())
+  demandeurId   String
+  statut        StatutDemande    @default(EN_ATTENTE)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  dateApprouvee DateTime?
+  raisonRefus   String?
+  adminId       String?
+  datePris      DateTime?
+  admin         User?            @relation("ApprovedByAdmin", fields: [adminId], references: [id])
+  demandeur     Demandeur        @relation(fields: [demandeurId], references: [id])
+  produits      DemandeProduit[]
+}
+
+model DemandeProduit {
+  id        String  @id @default(uuid())
+  demandeId String
+  produitId String
+  quantite  Int
+  demande   Demande @relation(fields: [demandeId], references: [id], onDelete: Cascade)
+  produit   Produit @relation(fields: [produitId], references: [id])
+}
+
+model ProduitExceptionnel {
+  id               String                       @id @default(uuid())
+  name             String
+  marque           String?
+  description      String?
+  createdAt        DateTime                     @default(now())
+  updatedAt        DateTime                     @updatedAt
+  demandesProduits DemandeProduitExceptionnel[]
+}
+
+model DemandeExceptionnelle {
+  id                    String                       @id @default(uuid())
+  demandeurId           String
+  statut                StatutDemandeExceptionnelle  @default(EN_ATTENTE)
+  dateApprouvee         DateTime?
+  raisonRefus           String?
+  datePrevu             DateTime?
+  dateLivraison         DateTime?
+  fournisseurId         String?
+  fournisseur           Fournisseur?                 @relation(fields: [fournisseurId], references: [id])
+  createdAt             DateTime                     @default(now())
+  updatedAt             DateTime                     @updatedAt
+  demandeur             Demandeur                    @relation(fields: [demandeurId], references: [id])
+  produitsExceptionnels DemandeProduitExceptionnel[]
+}
+
+model DemandeProduitExceptionnel {
+  id                      String                @id @default(uuid())
+  demandeExceptionnelleId String
+  produitExceptionnelId   String
+  quantite                Int
+  isOrdered               Boolean               @default(false)
+  demandeExceptionnelle   DemandeExceptionnelle @relation(fields: [demandeExceptionnelleId], references: [id], onDelete: Cascade)
+  produitExceptionnel     ProduitExceptionnel   @relation(fields: [produitExceptionnelId], references: [id])
+}
+
+model Registre {
+  id            String           @id @default(uuid())
+  date          DateTime         @default(now())
+  userId        String
+  actionType    ActionType
+  description   String?          // Optional description of the action
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  user          User             @relation("PerformedByUser", fields: [userId], references: [id])
+  produits      RegistreProduit[] @relation("RegistreProduits")
+}
+
+model RegistreProduit {
+  id            String   @id @default(uuid())
+  registreId    String
+  produitId     String
+  action     ActionType  // Details like "Added", "Deleted", "Quantity updated"
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  registre      Registre @relation("RegistreProduits", fields: [registreId], references: [id], onDelete: Cascade)
+  produit       Produit  @relation("RegistreProduit", fields: [produitId], references: [id])
+}
+
+enum ActionType {
+  COMMANDE_LIVREE
+  COMMANDE_ANNULEE
+  PRODUIT_AJOUTE 
+  PRODUIT_MODIFIE
+  PRODUIT_SUPPRIME
+  DEMANDE_PRISE
+  DEMANDEEXCEPT_PRISE
+  VALIDE_COMMANDE
+  DEMANDEACCEPT
+
+}
+
+enum Role {
+  ADMIN
+  DEMANDEUR
+  GESTIONNAIRE
+  MAGASINNIER
+  UNDEFINED
+}
+
+enum DemandeurType {
+  EMPLOYE
+  ENSEIGNANT
+}
+
+enum StatutProduit {
+  NORMALE
+  CRITIQUE
+  RUPTURE
+}
+
+enum ProduitCritere {
+  DURABLE
+  CONSOMMABLE
+}
+
+enum StatutCommande {
+  EN_COURS
+  ANNULEE
+  EN_RETOUR
+  LIVREE
+  VALIDE
+  NON_VALIDE
+}
+
+enum StatutDemande {
+  EN_ATTENTE
+  APPROUVEE
+  REJETEE
+  PRISE
+}
+
+enum StatutDemandeExceptionnelle {
+  EN_ATTENTE
+  ACCEPTEE
+  COMMANDEE
+  LIVREE
+  REJETEE
+  PRISE
+}

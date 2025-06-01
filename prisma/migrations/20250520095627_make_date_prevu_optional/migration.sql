@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Commande" ALTER COLUMN "datePrevu" DROP NOT NULL,
+ALTER COLUMN "datePrevu" DROP DEFAULT;
