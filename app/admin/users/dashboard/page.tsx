@@ -57,7 +57,7 @@ interface OrderStatsData {
   month: string;
   approved: number;
   delivered: number;
-  quantitySortie:number;
+   quantitySortie:number;
   quantityEntree :number;
  
 }
@@ -66,8 +66,6 @@ interface StockMovementData {
   month: string;
   approved: number;
   delivered: number;
-  quantitySortie:number;
-  quantityEntree:number
 }
 
 
@@ -506,9 +504,11 @@ const createReportingEntry = async (reportType: string) => {
       console.error("Erreur lors de la récupération des stats produit :", err);
     }
   };
+
 const exportReportToPDF = async () => {
   toast.info("Génération du rapport annuel...");
   try {
+    // Create reporting entry for annual report
     await createReportingEntry("ANNUAL_REPORT");
 
     const {
@@ -520,7 +520,7 @@ const exportReportToPDF = async () => {
       products,
       orderStats,
       demandesParDemandeur,
-    } = await fetchDashboardData("1y");
+    } = await fetchDashboardData();
 
     console.log("Full Report Data:", {
       data,
@@ -539,16 +539,15 @@ const exportReportToPDF = async () => {
       return;
     }
 
-    // Utiliser le même principe que le rapport hebdomadaire
     const updatedOrderStats: { [productId: string]: OrderStatsData[] } = { ...orderStats };
     await Promise.all(
-      products.map(async (product: any) => {
+      products.map(async (product: Product) => {
         if (!updatedOrderStats[product.id] || updatedOrderStats[product.id].length === 0) {
           try {
-            const response = await fetch(`/api/admin/dashboard/commandes-par-produit-mois?productId=${product.id}&timeRange=1y`);
+            const response = await fetch(`/api/admin/dashboard/commandes-par-produit-mois?productId=${product.id}`);
             if (response.ok) {
               updatedOrderStats[product.id] = await response.json();
-              console.log(`Fetched order stats for ${product.nom} (${product.id}) (annual):`, updatedOrderStats[product.id]);
+              console.log(`Fetched order stats for ${product.nom} (${product.id}):`, updatedOrderStats[product.id]);
             } else {
               console.warn(`Failed to fetch order stats for ${product.nom} (${product.id}): ${response.statusText}`);
               updatedOrderStats[product.id] = [];
@@ -565,7 +564,6 @@ const exportReportToPDF = async () => {
     const pageWidth = doc.internal.pageSize.getWidth();
     let y = 10;
 
-    // Logo
     let logoBase64: string | null = null;
     try {
       const response = await fetch("/essths.png");
@@ -589,13 +587,11 @@ const exportReportToPDF = async () => {
       y += logoHeight + 10;
     }
 
-    // Période annuelle
     const currentYear = new Date().getFullYear();
-    const startDate = new Date(currentYear, 0, 1);  
+    const startDate = new Date(currentYear, 0, 1);
     const endDate = new Date(currentYear, 11, 31);
-    const period = `${startDate.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })} - ${endDate.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}`;
+    const period = `${startDate.toLocaleDateString("fr-FR", { month: "long", year: "numeric" })} - ${endDate.toLocaleDateString("fr-FR", { month: "long", year: "numeric" })}`;
 
-    // En-tête
     doc.setFontSize(18);
     doc.setTextColor(30, 144, 255);
     doc.text("Rapport Annuel - Gestion des Stocks et Commandes", pageWidth / 2, y, { align: "center" });
@@ -607,12 +603,12 @@ const exportReportToPDF = async () => {
     doc.text(`Période Analysée : ${period}`, pageWidth / 2, y + 5, { align: "center" });
     y += 15;
 
-    // 1. Résumé Général
     doc.setFontSize(14);
     doc.setTextColor(0);
     doc.text("1. Résumé Général", 10, y);
     y += 10;
-
+    
+    // Use autoTable function directly instead of doc.autoTable
     autoTable(doc, {
       startY: y,
       head: [["Description", "Valeur"]],
@@ -626,19 +622,20 @@ const exportReportToPDF = async () => {
       headStyles: { fillColor: [30, 144, 255], textColor: 255 },
       styles: { fontSize: 10 },
     });
+    
+    // Get the final Y position from the last table
     y = (doc as any).lastAutoTable.finalY + 10;
 
-    // 2. Analyse des Stocks
     doc.setFontSize(14);
     doc.text("2. Analyse des Stocks", 10, y);
     y += 10;
-    const totalStock = data.stock.reduce((acc: number, curr: any) => acc + (curr.stock || 0), 0) || 1;
-
+    const totalStock = data.stock.reduce((acc: number, curr: StockItem) => acc + (curr.stock || 0), 0) || 1;
+    
     autoTable(doc, {
       startY: y,
       head: [["Catégorie", "Stock", "Pourcentage"]],
       body: data.stock.length > 0
-        ? data.stock.map((item: any) => [
+        ? data.stock.map((item: StockItem) => [
             item.category || "Inconnue",
             item.stock || 0,
             `${((item.stock / totalStock) * 100).toFixed(1)}%`,
@@ -648,177 +645,89 @@ const exportReportToPDF = async () => {
       headStyles: { fillColor: [30, 144, 255], textColor: 255 },
       styles: { fontSize: 10 },
     });
+    
     y = (doc as any).lastAutoTable.finalY + 10;
 
-    // 3. Commandes par Fournisseur
     doc.setFontSize(14);
     doc.text("3. Commandes par Fournisseur", 10, y);
     y += 10;
-
+    
     autoTable(doc, {
       startY: y,
       head: [["Fournisseur", "Commandes"]],
       body: commandesParFournisseur.length > 0
-        ? commandesParFournisseur.map((item: any) => [item.fournisseur || "Inconnu", item.commandes || 0])
+        ? commandesParFournisseur.map((item: CommandeParFournisseur) => [item.fournisseur || "Inconnu", item.commandes || 0])
         : [["Aucun fournisseur", "0"]],
       theme: "grid",
       headStyles: { fillColor: [30, 144, 255], textColor: 255 },
       styles: { fontSize: 10 },
     });
+    
     y = (doc as any).lastAutoTable.finalY + 10;
 
-    // 4. Quantité entrée et Quantité sortie par Produit
     doc.setFontSize(14);
     doc.text("4. Quantité entrée et Quantité sortie par Produit", 10, y);
     y += 10;
-
+    
     const fiscalMonths = [
       "January", "February", "March", "April", "May", "June",
       "July", "August", "September", "October", "November", "December",
     ];
-
+    
     for (const product of products) {
       let productOrderStats = updatedOrderStats[product.id] || [];
-      console.log(`Order stats for ${product.nom} (${product.id}) in annual report:`, productOrderStats);
-
+      console.log(`Order stats for ${product.nom} (${product.id}) in full report:`, productOrderStats);
+      
       doc.setFontSize(12);
       doc.text(`Produit : ${product.nom}`, 10, y);
       y += 7;
-
-      // Compléter les mois manquants avec des zéros pour le rapport annuel
-      const statsByMonth: { [month: string]: any } = {};
-      productOrderStats.forEach((stat: any) => {
-        statsByMonth[stat.month] = stat;
-      });
       
-      const completeStats = fiscalMonths.map((month) => {
-        const existingStat = statsByMonth[month];
-        return existingStat || { month, approved: 0, delivered: 0, quantitySortie: 0, quantityEntree: 0 };
-      });
-
-      autoTable(doc, {
-        startY: y,
-        head: [["Mois", "Quantité sortie", "Quantité entrée"]],
-        body: completeStats.map((stat: any) => [
-          stat.month,
-          stat.approved || 0,  // Utiliser approved pour Quantité sortie
-          stat.delivered || 0, // Utiliser delivered pour Quantité entrée
-        ]),
-        theme: "grid",
-        headStyles: { fillColor: [30, 144, 255], textColor: 255 },
-        styles: { fontSize: 10 },
-      });
-
+      if (!productOrderStats.length) {
+        console.warn(`No order stats for product: ${product.nom} (${product.id})`);
+        autoTable(doc, {
+          startY: y,
+          head: [["Mois", "Quantité sortie", "Quantité entrée"]],
+          body: [["N/A", "0", "0"]],
+          theme: "grid",
+          headStyles: { fillColor: [30, 144, 255], textColor: 255 },
+          styles: { fontSize: 10 },
+        });
+      } else {
+        // Add your logic for when productOrderStats has data
+        autoTable(doc, {
+          startY: y,
+          head: [["Mois", "Quantité sortie", "Quantité entrée"]],
+          body: productOrderStats.map((stat: OrderStatsData) => [
+            stat.month || "N/A",
+            stat.quantitySortie || 0,
+            stat.quantityEntree || 0
+          ]),
+          theme: "grid",
+          headStyles: { fillColor: [30, 144, 255], textColor: 255 },
+          styles: { fontSize: 10 },
+        });
+      }
+      
       y = (doc as any).lastAutoTable.finalY + 10;
-
-      // Vérifier si on a besoin d'une nouvelle page
+      
+      // Check if we need a new page
       if (y > 250) {
         doc.addPage();
         y = 20;
       }
     }
 
-    // 5. Commandes et Demandes
-    doc.setFontSize(14);
-    doc.text("5. Commandes et Demandes", 10, y);
-    y += 10;
-    const totalCommandes = commandesDemandesParMois.reduce((sum: number, item: any) => sum + (item.commandes || 0), 0) || 0;
-    const totalDemandes = commandesDemandesParMois.reduce((sum: number, item: any) => sum + (item.demandes || 0), 0) || 0;
-
-    autoTable(doc, {
-      startY: y,
-      head: [["Période", "Commandes", "Demandes"]],
-      body: [
-        ["Total", totalCommandes, totalDemandes],
-        [period, totalCommandes, totalDemandes],
-      ],
-      theme: "grid",
-      headStyles: { fillColor: [30, 144, 255], textColor: 255 },
-      styles: { fontSize: 10 },
-    });
-    y = (doc as any).lastAutoTable.finalY + 10;
-
-    // 6. Demandes par Demandeur
-    doc.setFontSize(14);
-    doc.text("6. Demandes par Demandeur", 10, y);
-    y += 10;
-
-    let demandesData: any[] = demandesParDemandeur || [];
-    console.log("Demandes par Demandeur from fetchDashboardData (annual):", JSON.stringify(demandesData, null, 2));
-
-    if (!demandesData?.length || !demandesData.some((item) => Object.keys(item).length > 0)) {
-      console.warn("Empty or invalid demandesParDemandeur. Attempting fallback fetch for annual report.");
-      try {
-        const response = await fetch(`/api/dashboard/demandes-par-demandeur?timeRange=1y`);
-        if (!response.ok) {
-          throw new Error(`Erreur HTTP ${response.status}: ${await response.text()}`);
-        }
-        demandesData = await response.json();
-        console.log("Fallback fetch for demandes-par-demandeur (annual):", JSON.stringify(demandesData, null, 2));
-      } catch (error) {
-        console.error("Error in fallback fetch for demandes-par-demandeur (annual):", error);
-        demandesData = [];
-        toast.warning("Impossible de récupérer les données des demandes par demandeur.");
-      }
-    }
-
-    const isMonthBasedFormat = demandesData.length > 0 && demandesData.every((item: any) => "month" in item);
-
-    let demandeurTotals: [string, number][] = [];
-
-    if (isMonthBasedFormat) {
-      const demandeurs = [...new Set(demandesData.flatMap((item: any) => Object.keys(item).filter((key) => key !== "month")))];
-      console.log("Demandeurs extracted (annual):", demandeurs);
-
-      if (demandeurs.length > 0) {
-        demandeurTotals = demandeurs.map((demandeur) => [
-          demandeur,
-          demandesData.reduce((sum: number, item: any) => sum + (item[demandeur] || 0), 0),
-        ]);
-      }
-    } else {
-      const demandeursMap: { [key: string]: number } = {};
-
-      demandesData.forEach((item: any) => {
-        const demandeur = item.Demandeur || "Unknown";
-        const count = Number(item.Nombre) || 0;
-        if (demandeur && demandeur !== "Unknown") {
-          demandeursMap[demandeur] = (demandeursMap[demandeur] || 0) + count;
-        }
-      });
-
-      demandeurTotals = Object.entries(demandeursMap).map(([demandeur, count]) => [demandeur, count]);
-    }
-
-    if (demandeurTotals.length > 0) {
-      autoTable(doc, {
-        startY: y,
-        head: [["Demandeur", "Nombre de Demandes"]],
-        body: demandeurTotals,
-        theme: "grid",
-        headStyles: { fillColor: [30, 144, 255], textColor: 255 },
-        styles: { fontSize: 10 },
-      });
-    } else {
-      console.warn("No valid demandeurs found (annual):", demandesData);
-      autoTable(doc, {
-        startY: y,
-        head: [["Demandeur", "Statut"]],
-        body: [["N/A", "Aucun demandeur valide trouvé"]],
-        theme: "grid",
-        headStyles: { fillColor: [30, 144, 255], textColor: 255 },
-        styles: { fontSize: 10 },
-      });
-    }
-
-    const filename = `Rapport_Annuel_${currentYear}.pdf`;
-    doc.save(filename);
-    toast.success("Rapport annuel généré avec succès!");
+    // Save the PDF
+    doc.save(`rapport-annuel-${new Date().getFullYear()}.pdf`);
+    toast.success("Rapport généré avec succès!");
+    
   } catch (error) {
-    console.error("Error generating annual PDF:", error);
-    toast.error(`Erreur lors de la génération du rapport annuel: ${error instanceof Error ? error.message : "Erreur inconnue"}`);
+    console.error("Error generating PDF:", error);
+    toast.error("Erreur lors de la génération du rapport.");
   }
 };
+
+
 const exportWeeklyReportToPDF = async () => {
   toast.info("Génération du rapport hebdomadaire...");
   try {
@@ -1286,7 +1195,6 @@ const exportWeeklyReportToPDF = async () => {
     </ExpandableChart>
   </motion.div>
 
-  
 
   <motion.div
     initial={{ opacity: 0, y: 20 }}
