@@ -900,7 +900,7 @@ const checkExistingExceptionalProducts = async () => {
               Permet d'ajouter une nouvelle demande avec une liste de produits réguliers.
             </p>
             <div className="grid gap-4">
-              <h3 className="text-xl font-bold text-gray-800">Ajouter une Nouvelle Demande</h3>
+            
               {loading ? (
                 <Skeleton className="h-10 w-full rounded" />
               ) : !products || products.length === 0 ? (
