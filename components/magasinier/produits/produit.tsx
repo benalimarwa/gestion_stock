@@ -66,16 +66,22 @@ export type Product = {
   remarque?: string | null;
 };
 
+// Define Fournisseur type
+type Fournisseur = {
+  id: string;
+  nom: string;
+  contact: string;
+  score?: number | null;
+};
 
-
-// EditProductForm (add onCancel and update onSave type)
+// EditProductForm (unchanged)
 const EditProductForm = ({
   product,
   onSave,
   onCancel,
 }: {
   product: Product;
-  onSave: (updatedProduct: Partial<Omit<Product, 'categorie'>>) => Promise<void>;
+  onSave: (updatedProduct: any) => void;
   onCancel: () => void;
 }) => {
   const [formData, setFormData] = React.useState({
@@ -100,9 +106,9 @@ const EditProductForm = ({
     return "NORMALE";
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    await onSave({ ...formData, id: product.id, statut: calculateStatus() });
+    onSave({ ...formData, id: product.id, statut: calculateStatus() });
   };
 
   return (
@@ -196,7 +202,6 @@ const EditProductForm = ({
             type="button"
             variant="outline"
             className="border-blue-200 text-blue-600 hover:bg-blue-100"
-            onClick={onCancel}
           >
             Annuler
           </Button>
@@ -211,27 +216,50 @@ const EditProductForm = ({
     </form>
   );
 };
-type NewProductData = Omit<Product, 'id' | 'statut' | 'categorie'> & { categorieId: string ,statut:string};
+
+
 const AddProductForm = ({
   onSave,
   onCancel,
   categories,
-  
 }: {
-  onSave: (newProduct: NewProductData) => void;
-  onCancel: () => void; // Uncommented - this is needed since it's used in the parent component
+  onSave: (newProduct: any) => void;
+  onCancel: () => void;
   categories: { id: string; nom: string }[];
 }) => {
   const [formData, setFormData] = React.useState({
     nom: "",
     marque: "",
-    statut:"",
     quantite: 0,
     quantiteMinimale: 0,
     categorieId: "",
+    fournisseurId: "",
     critere: "DURABLE" as ProduitCritere,
     remarque: "",
   });
+  const [fournisseurs, setFournisseurs] = React.useState<Fournisseur[]>([]);
+  const [isLoadingFournisseurs, setIsLoadingFournisseurs] = React.useState(true);
+
+  React.useEffect(() => {
+    const fetchFournisseurs = async () => {
+      try {
+        setIsLoadingFournisseurs(true);
+        const response = await fetch("/api/magasinier/fournissuer");
+        if (!response.ok) {
+          throw new Error("Erreur lors du chargement des fournisseurs");
+        }
+        const data = await response.json();
+        setFournisseurs(data);
+      } catch (error) {
+        console.error("Erreur:", error);
+        toast.error("Impossible de charger la liste des fournisseurs");
+      } finally {
+        setIsLoadingFournisseurs(false);
+      }
+    };
+
+    fetchFournisseurs();
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -309,6 +337,11 @@ const AddProductForm = ({
       return;
     }
 
+    if (!formData.fournisseurId) {
+      toast.error("Veuillez sélectionner un fournisseur.");
+      return;
+    }
+
     onSave({
       ...formData,
       quantite: Number(formData.quantite),
@@ -316,7 +349,6 @@ const AddProductForm = ({
       statut: calculateStatus(),
     });
   };
-
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -389,6 +421,26 @@ const AddProductForm = ({
           </Select>
         </div>
         <div className="space-y-2">
+          <Label htmlFor="fournisseurId" className="text-sm font-medium text-gray-700">Fournisseur *</Label>
+          <Select
+            name="fournisseurId"
+            value={formData.fournisseurId}
+            onValueChange={(value) => setFormData((prev) => ({ ...prev, fournisseurId: value }))}
+            disabled={isLoadingFournisseurs}
+          >
+            <SelectTrigger className="bg-gray-50 border-gray-200 text-gray-700 focus:ring-2 focus:ring-blue-400">
+              <SelectValue placeholder={isLoadingFournisseurs ? "Chargement..." : "Sélectionner un fournisseur"} />
+            </SelectTrigger>
+            <SelectContent className="bg-white border-gray-200 text-gray-700">
+              {fournisseurs.map((fournisseur) => (
+                <SelectItem key={fournisseur.id} value={fournisseur.id} className="hover:bg-blue-50">
+                  {fournisseur.nom}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
           <Label htmlFor="critere" className="text-sm font-medium text-gray-700">Critère *</Label>
           <Select
             name="critere"
@@ -428,6 +480,7 @@ const AddProductForm = ({
         <Button
           type="submit"
           className="bg-gradient-to-r from-blue-500 to-indigo-500 text-white hover:from-blue-600 hover:to-indigo-600"
+          disabled={isLoadingFournisseurs}
         >
           Enregistrer
         </Button>

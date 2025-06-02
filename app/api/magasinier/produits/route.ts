@@ -10,17 +10,32 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
     }
 
-    // Get all products with their categories
     const produits = await prisma.produit.findMany({
       include: {
-        categorie: true
+        categorie: true,
+        fournisseurs: {
+          include: {
+            fournisseur: {
+              select: {
+                id: true,
+                nom: true,
+              },
+            },
+          },
+        },
       },
       orderBy: {
-        updatedAt: 'desc'
-      }
+        updatedAt: "desc",
+      },
     });
 
-    return NextResponse.json(produits);
+    // Transform the response to flatten the fournisseurs structure
+    const transformedProduits = produits.map((produit) => ({
+      ...produit,
+      fournisseurs: produit.fournisseurs.map((pf) => pf.fournisseur),
+    }));
+
+    return NextResponse.json(transformedProduits);
   } catch (error) {
     console.error("Erreur lors de la récupération des produits:", error);
     return NextResponse.json(
@@ -57,7 +72,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Quantité minimale invalide. Doit être un nombre positif." }, { status: 400 });
     }
 
-    // Check if category exists
+    // Validate category
     const category = await prisma.categorie.findUnique({
       where: { id: data.categorieId },
     });
@@ -65,6 +80,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Catégorie non trouvée." }, { status: 400 });
     }
 
+    // Validate suppliers if provided
+    if (data.fournisseurIds && Array.isArray(data.fournisseurIds) && data.fournisseurIds.length > 0) {
+      const fournisseurs = await prisma.fournisseur.findMany({
+        where: { id: { in: data.fournisseurIds } },
+      });
+      if (fournisseurs.length !== data.fournisseurIds.length) {
+        return NextResponse.json({ error: "Un ou plusieurs fournisseurs non trouvés." }, { status: 400 });
+      }
+    }
+
+    // Create the product
     const product = await prisma.produit.create({
       data: {
         nom: data.nom.trim(),
@@ -76,12 +102,43 @@ export async function POST(req: NextRequest) {
         remarque: data.remarque?.trim() || null,
         categorieId: data.categorieId,
       },
-      include:{
-        categorie:true
-      }
     });
 
-    return NextResponse.json(product, { status: 201 });
+    // Create ProduitFournisseur records if suppliers are provided
+    if (data.fournisseurIds && Array.isArray(data.fournisseurIds) && data.fournisseurIds.length > 0) {
+      await prisma.produitFournisseur.createMany({
+        data: data.fournisseurIds.map((fournisseurId: string) => ({
+          produitId: product.id,
+          fournisseurId,
+        })),
+      });
+    }
+
+    // Fetch the created product with its category and suppliers
+    const createdProduct = await prisma.produit.findUnique({
+      where: { id: product.id },
+      include: {
+        categorie: true,
+        fournisseurs: {
+          include: {
+            fournisseur: {
+              select: {
+                id: true,
+                nom: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Transform the response
+    const transformedProduct = {
+      ...createdProduct,
+      fournisseurs: createdProduct?.fournisseurs.map((pf) => pf.fournisseur) || [],
+    };
+
+    return NextResponse.json(transformedProduct, { status: 201 });
   } catch (error: any) {
     console.error("Erreur lors de la création du produit:", error);
     if (error.code === "P2002") {
