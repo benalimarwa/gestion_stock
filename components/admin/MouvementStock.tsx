@@ -97,7 +97,7 @@ export function MouvementStock() {
         setChartData(filteredData);
       } catch (error) {
         console.error("Erreur:", error);
-        
+        setError('Erreur inconnue lors de la récupération des données');
       } finally {
         setLoading(false);
       }
