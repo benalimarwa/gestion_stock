@@ -1,6 +1,8 @@
 "use client";
 
 import Wrapper from "@/components/admin/Wrapper";
+
+
 import { useState, useEffect, ChangeEvent, FormEvent } from "react";
 import { useUser, useClerk } from "@clerk/nextjs";
 import { motion, AnimatePresence } from "framer-motion";
@@ -16,6 +18,13 @@ type UserData = {
   profilePicture: string | File;
 };
 
+type Fournisseur = {
+  id: string;
+  nom: string;
+  contact: string;
+  score?: number | null;
+};
+
 const Profil = () => {
   const { user, isLoaded } = useUser();
   const { signOut } = useClerk();
@@ -23,6 +32,7 @@ const Profil = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [isPasswordLoading, setIsPasswordLoading] = useState(false);
   const [isDeactivateModalOpen, setIsDeactivateModalOpen] = useState(false);
+  const [isDeactivating, setIsDeactivating] = useState(false);
   const [userData, setUserData] = useState<UserData>({
     fullName: "Loading...",
     email: "Loading...",
@@ -32,6 +42,7 @@ const Profil = () => {
   const [formData, setFormData] = useState<UserData>(userData);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [fournisseurs, setFournisseurs] = useState<Fournisseur[]>([]);
 
   useEffect(() => {
     setIsClient(true);
@@ -39,11 +50,13 @@ const Profil = () => {
       const newUserData = {
         fullName: user.fullName || "Unnamed User",
         email: user.emailAddresses[0]?.emailAddress || "No email",
-        bio: "A passionate developer.",
+        bio: "",
         profilePicture: user.imageUrl || "https://via.placeholder.com/150",
       };
       setUserData(newUserData);
       setFormData(newUserData);
+
+      
     }
   }, [isLoaded, user]);
 
@@ -79,7 +92,8 @@ const Profil = () => {
       });
 
       if (!updateResponse.ok) {
-        throw new Error("Échec de la mise à jour via l'API");
+        const errorData = await updateResponse.json();
+        throw new Error(errorData.error || "Échec de la mise à jour via l'API");
       }
 
       if (formData.profilePicture !== userData.profilePicture) {
@@ -169,24 +183,36 @@ const Profil = () => {
   };
 
   const confirmDeactivation = async () => {
+    if (!user) {
+      toast.warning("Utilisateur non chargé. Veuillez réessayer.", {
+        className:
+          "bg-yellow-900/60 text-yellow-300 border border-yellow-700/60 p-3 rounded-md text-sm font-[Inter,sans-serif]",
+      });
+      return;
+    }
+    setIsDeactivating(true);
     try {
       const response = await fetch("/api/user/desactivate", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "DEACTIVATED" }),
       });
 
       if (!response.ok) {
-        const contentType = response.headers.get("content-type");
         let errorMessage = "Échec de la mise à jour dans la base de données";
+        const contentType = response.headers.get("content-type");
         if (contentType && contentType.includes("application/json")) {
           const errorData = await response.json();
-          errorMessage = errorData.error || errorMessage;
+          errorMessage = errorData.error || errorData.details || errorMessage;
         } else {
           const text = await response.text();
           console.error(`Non-JSON response (status: ${response.status}):`, text.substring(0, 500));
-          errorMessage = response.status === 404
-            ? "API endpoint not found (/api/user/desactivate). Please check if the route exists at app/api/user/deactivate/route.ts."
-            : `Réponse inattendue du serveur (status: ${response.status}, HTML au lieu de JSON)`;
+          errorMessage =
+            response.status === 404
+              ? "L'endpoint API /api/user/desactivate est introuvable. Vérifiez que la route existe à app/api/user/desactivate/route.ts."
+              : response.status === 500
+              ? "Erreur serveur interne. Vérifiez les logs du serveur pour plus de détails."
+              : `Réponse inattendue du serveur (status: ${response.status})`;
         }
         throw new Error(errorMessage);
       }
@@ -209,6 +235,7 @@ const Profil = () => {
           "bg-red-900/60 text-red-300 border border-red-700/60 p-3 rounded-md text-sm font-[Inter,sans-serif]",
       });
     } finally {
+      setIsDeactivating(false);
       setIsDeactivateModalOpen(false);
     }
   };
@@ -358,6 +385,18 @@ const Profil = () => {
                   <p className="text-sm text-blue-200 mt-2 sm:text-sm text-xs">
                     <span className="font-medium text-blue-100">Bio :</span> {userData.bio}
                   </p>
+                  {fournisseurs.length > 0 && (
+                    <div className="mt-4">
+                      <p className="text-sm font-medium text-blue-100">Fournisseurs Gérés :</p>
+                      <ul className="text-sm text-blue-200 mt-1">
+                        {fournisseurs.map((fournisseur) => (
+                          <li key={fournisseur.id}>
+                            {fournisseur.nom} ({fournisseur.contact})
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
                 <TooltipProvider>
                   <Tooltip>
@@ -400,7 +439,7 @@ const Profil = () => {
                         type="password"
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
-                        className="w-full h-9 px-3 mt-1 bg-blue-900/60 border border-blue-800/60 text-blue-100 rounded-md text-sm focus:ring-2 focus:ring-blue-700/60"
+                        className="w-full h-9 px-3 mt-1 bg-blue-900/60 border border-blue-800/60 text-blue-100 rounded-md text-sm focus:ring-2 focus:ring-blue-600"
                         disabled={isPasswordLoading}
                       />
                     </div>
@@ -412,14 +451,14 @@ const Profil = () => {
                       <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                         <Button
                           type="submit"
-                          className="w-full h-9 px-4 bg-purple-800/80 text-green-300 hover:bg-blue-700/80 text-sm rounded-md"
+                          className="w-full h-9 px-4 bg-purple-600/80 text-blue-100 hover:bg-blue-700/80 text-sm rounded-md"
                           disabled={isPasswordLoading}
                         >
                           {isPasswordLoading ? "Mise à jour..." : "Mettre à jour le mot de passe"}
                         </Button>
                       </motion.div>
                     </TooltipTrigger>
-                    <TooltipContent className="bg-pink-900/80 text-blue-100 border-blue-800/60 text-xs">
+                    <TooltipContent className="bg-blue-900/80 text-blue-100 border-blue-600/60 text-sm">
                       Mettre à jour le mot de passe
                     </TooltipContent>
                   </Tooltip>
@@ -435,13 +474,14 @@ const Profil = () => {
                     <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
                       <Button
                         onClick={handleDeleteAccount}
-                        className="w-full h-9 px-4 bg-pink-900/60 text-red-300 hover:bg-red-800/60 text-sm rounded-md"
+                        className="w-full h-9 px-4 bg-red-700/60 text-red-300 hover:bg-red-800/60 text-sm rounded-md"
+                        disabled={isDeactivating}
                       >
-                        Désactiver mon compte
+                        {isDeactivating ? "Désactivation..." : "Désactiver mon compte"}
                       </Button>
                     </motion.div>
                   </TooltipTrigger>
-                  <TooltipContent className="bg-purple-900/80 text-blue-100 border-blue-800/60 text-xs">
+                  <TooltipContent className="bg-blue-900/60 text-blue-100 border-blue-600/60 text-sm">
                     Désactiver le compte (réversible par l'administrateur)
                   </TooltipContent>
                 </Tooltip>
@@ -450,14 +490,13 @@ const Profil = () => {
           </div>
         </motion.div>
 
-        {/* Deactivation Confirmation Modal */}
         <AnimatePresence>
           {isDeactivateModalOpen && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50"
               onClick={() => setIsDeactivateModalOpen(false)}
             >
               <motion.div
@@ -465,7 +504,7 @@ const Profil = () => {
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.8, opacity: 0 }}
                 transition={{ duration: 0.3 }}
-                className="bg-blue-900/60 backdrop-blur-md rounded-lg shadow-xl p-6 border border-blue-800/60 max-w-md w-full mx-4 relative"
+                className="bg-blue-900/60 rounded-lg shadow-lg p-6 border border-blue-600/60 max-w-md w-full mx-4 relative"
                 onClick={(e) => e.stopPropagation()}
                 role="dialog"
                 aria-labelledby="modal-title"
@@ -475,19 +514,20 @@ const Profil = () => {
                 <div className="relative">
                   <h2
                     id="modal-title"
-                    className="text-xl font-semibold bg-gradient-to-r from-blue-300 to-purple-300 bg-clip-text text-transparent mb-4"
-                  >
-                    Confirmer la désactivation
+                    className="text-xl font-semibold bg-gradient-to-r from-blue-300 to-cyan-400 bg-clip-text text-transparent mb-4"
+                    >
+                    Confirmação de Desativação
                   </h2>
                   <p className="text-blue-200 text-sm mb-6">
-                    Êtes-vous sûr de vouloir désactiver votre compte ? Cette action est irréversible sans intervention de l'administrateur.
+                    Détes-vous sûr(e) de vouloir désactiver votre compte ? Cette action est irréversible sans intervention de l'administrateur.
                   </p>
                   <div className="flex justify-end gap-3">
                     <motion.button
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
                       onClick={() => setIsDeactivateModalOpen(false)}
-                      className="h-9 px-4 bg-transparent text-blue-200 hover:text-blue-100 text-sm rounded-md border border-blue-800/60"
+                      className="h-9 px-4 bg-transparent text-blue-200 hover:text-blue-100 border border-blue-600/60 text-sm rounded-md"
+                      disabled={isDeactivating}
                     >
                       Annuler
                     </motion.button>
@@ -495,9 +535,10 @@ const Profil = () => {
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
                       onClick={confirmDeactivation}
-                      className="h-9 px-4 bg-red-900/60 text-red-300 hover:bg-red-800/60 text-sm rounded-md"
+                      className="h-9 px-4 bg-red-700/60 text-red-300 hover:bg-red-800/60 text-sm rounded-md"
+                      disabled={isDeactivating}
                     >
-                      Confirmer
+                      {isDeactivating ? "Désactivation..." : "Confirmer"}
                     </motion.button>
                   </div>
                 </div>
