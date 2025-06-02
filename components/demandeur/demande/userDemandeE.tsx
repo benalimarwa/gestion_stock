@@ -895,9 +895,7 @@ const checkExistingExceptionalProducts = async () => {
                 ✕
               </Button>
             </div>
-            <h3 id="add-request-title" className="hidden">
-              Ajouter une Nouvelle Demande
-            </h3>
+            
             <p id="add-request-description" className="hidden">
               Permet d'ajouter une nouvelle demande avec une liste de produits réguliers.
             </p>
@@ -1021,7 +1019,7 @@ const checkExistingExceptionalProducts = async () => {
               Permet d'ajouter une nouvelle demande avec des produits exceptionnels personnalisés.
             </p>
             <div className="grid gap-4">
-              <h3 className="text-xl font-bold text-gray-800">Ajouter une Demande Exceptionnelle</h3>
+            
               {newExceptionalProducts && newExceptionalProducts.length > 0 ? (
                 <>
                   {console.log("newExceptionalProducts before map:", newExceptionalProducts)}
