@@ -248,19 +248,7 @@ export async function POST(req: NextRequest) {
           console.error("Invalid exceptional product data:", prod);
           return NextResponse.json({ error: "Données de produit exceptionnel invalides" }, { status: 400 });
         }
-        const existingProduitExceptionnel = await prisma.produitExceptionnel.findFirst({
-          where: {
-            name: prod.name,
-            marque: prod.marque || null,
-          },
-        });
-        if (existingProduitExceptionnel) {
-          console.error("Exceptional product already exists:", prod);
-          return NextResponse.json(
-            { error: `Produit exceptionnel '${prod.name}' avec marque '${prod.marque || "Inconnu"}' existe déjà` },
-            { status: 400 }
-          );
-        }
+        
       }
 
       const demandeExceptionnelle = await prisma.demandeExceptionnelle.create({
