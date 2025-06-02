@@ -162,12 +162,13 @@ export function OngoingOrdersTable() {
       toast.warning("Commande livrée, mais échec de l'enregistrement dans le registre");
     }
   };
-
- const deliverOrder = async () => {
+// Version recommandée avec FormData (plus simple pour les uploads de fichiers)
+const deliverOrder = async () => {
   if (!orderToDeliver) return;
   
   try {
     setProcessingOrder(orderToDeliver);
+    
     const formData = new FormData();
     formData.append("statut", "LIVREE");
     
@@ -203,8 +204,6 @@ export function OngoingOrdersTable() {
       }
       
       formData.append("facture", invoiceFile);
-    } else {
-      console.log("No file selected for upload");
     }
 
     console.log("Sending request to:", `/api/magasinier/commandes/commandes-en-attente/${orderToDeliver}/status`);
@@ -212,21 +211,31 @@ export function OngoingOrdersTable() {
     const response = await fetch(`/api/magasinier/commandes/commandes-en-attente/${orderToDeliver}/status`, {
       method: "PUT",
       body: formData,
+      // IMPORTANT: Ne pas définir Content-Type pour FormData
     });
 
     console.log("Response status:", response.status);
     console.log("Response headers:", Object.fromEntries(response.headers.entries()));
 
     if (!response.ok) {
-      const errorData = await response.json();
-      console.error("Server error response:", errorData);
-      throw new Error(errorData.error || `Erreur ${response.status}`);
+      let errorMessage;
+      try {
+        const errorData = await response.json();
+        console.error("Server error response:", errorData);
+        errorMessage = errorData.error || errorData.message || `Erreur ${response.status}`;
+      } catch (jsonError) {
+        // Si la réponse n'est pas du JSON valide
+        const textResponse = await response.text();
+        console.error("Non-JSON error response:", textResponse);
+        errorMessage = `Erreur serveur: ${response.status} - ${textResponse || 'Réponse vide'}`;
+      }
+      throw new Error(errorMessage);
     }
 
     const result = await response.json();
     console.log("Success response:", result);
 
-    // Rest of your success handling code...
+    // Gestion du succès
     const order = returnedOrders.find((o) => o.id === orderToDeliver);
     if (order && order.produits.length > 0) {
       const productIds = order.produits.map((item) => item.produit.id);
@@ -244,6 +253,119 @@ export function OngoingOrdersTable() {
   } catch (err) {
     console.error("Erreur lors de la livraison de la commande:", err);
     console.error("Error stack:", err instanceof Error ? err.stack : 'No stack trace');
+    toast.error(err instanceof Error ? err.message : "Impossible de mettre à jour le statut de la commande");
+  } finally {
+    setProcessingOrder(null);
+    setDeliveryModal(false);
+    setOrderToDeliver(null);
+    resetFileInput();
+  }
+};
+
+// Option 2: Si votre API ne peut gérer que du JSON, vous devrez convertir le fichier en base64
+const deliverOrderWithBase64 = async () => {
+  if (!orderToDeliver) return;
+  
+  try {
+    setProcessingOrder(orderToDeliver);
+    
+    // Typer correctement l'objet de requête
+    let requestBody: {
+      statut: string;
+      facture?: {
+        data: string;
+        name: string;
+        type: string;
+      };
+    } = {
+      statut: "LIVREE"
+    };
+    
+    if (invoiceFile) {
+      console.log("Frontend file details:", {
+        name: invoiceFile.name,
+        size: invoiceFile.size,
+        type: invoiceFile.type,
+        lastModified: invoiceFile.lastModified,
+      });
+      
+      if (invoiceFile.size === 0) {
+        toast.error("Le fichier facture est vide");
+        return;
+      }
+      if (invoiceFile.type !== "application/pdf") {
+        toast.error("Veuillez sélectionner un fichier PDF valide");
+        return;
+      }
+      
+      // Convertir le fichier en base64
+      try {
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result;
+            if (typeof result === 'string') {
+              resolve(result.split(',')[1]); // Enlever le préfixe data:
+            } else {
+              reject(new Error('Erreur de lecture du fichier'));
+            }
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(invoiceFile);
+        });
+        
+        requestBody.facture = {
+          data: base64,
+          name: invoiceFile.name,
+          type: invoiceFile.type
+        };
+      } catch (readError) {
+        console.error("Error reading file:", readError);
+        toast.error("Impossible de lire le fichier sélectionné");
+        return;
+      }
+    }
+
+    const response = await fetch(`/api/magasinier/commandes/commandes-en-attente/${orderToDeliver}/status`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch (jsonError) {
+        const textResponse = await response.text();
+        console.error("Non-JSON error response:", textResponse);
+        throw new Error(`Erreur serveur: ${response.status} - ${textResponse}`);
+      }
+      throw new Error(errorData.error || errorData.message || `Erreur ${response.status}`);
+    }
+
+    const result = await response.json();
+    console.log("Success response:", result);
+
+    // Reste du code de gestion du succès...
+    const order = returnedOrders.find((o) => o.id === orderToDeliver);
+    if (order && order.produits.length > 0) {
+      const productIds = order.produits.map((item) => item.produit.id);
+      const description = `Commande ${order.id.substring(0, 8)}... livrée. Produits: ${order.produits
+        .map((item) => `${item.produit.nom} (Quantité: ${item.quantite})`)
+        .join(", ")}`;
+      await logRegistryAction(productIds, "COMMANDE_LIVREE", description);
+    }
+
+    const updatedOrders = returnedOrders.filter((order) => order.id !== orderToDeliver);
+    setReturnedOrders(updatedOrders);
+    updateFilteredOrders(orderToDeliver);
+    toast.success("Commande marquée comme livrée. Quantités de produits mises à jour !");
+    
+  } catch (err) {
+    console.error("Erreur lors de la livraison de la commande:", err);
     toast.error(err instanceof Error ? err.message : "Impossible de mettre à jour le statut de la commande");
   } finally {
     setProcessingOrder(null);
