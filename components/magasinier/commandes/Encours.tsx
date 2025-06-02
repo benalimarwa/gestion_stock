@@ -169,13 +169,25 @@ export function OngoingOrdersTable() {
     setProcessingOrder(orderToDeliver);
     const formData = new FormData();
     formData.append("statut", "LIVREE");
-    
+
     if (invoiceFile) {
+      console.log("Frontend file details:", {
+        name: invoiceFile.name,
+        size: invoiceFile.size,
+        type: invoiceFile.type,
+      });
+
+      if (invoiceFile.size === 0) {
+        toast.error("Le fichier facture est vide");
+        return;
+      }
       if (invoiceFile.type !== "application/pdf") {
         toast.error("Veuillez sélectionner un fichier PDF valide");
         return;
       }
       formData.append("facture", invoiceFile);
+    } else {
+      console.log("No file selected for upload");
     }
 
     const response = await fetch(`/api/magasinier/commandes/commandes-en-attente/${orderToDeliver}/status`, {
