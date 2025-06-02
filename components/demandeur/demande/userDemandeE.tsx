@@ -312,36 +312,36 @@ export function PendingRequestsTable() {
     }
   };
 
-  const checkExistingExceptionalProducts = async () => {
-    try {
-      const response = await fetch("/api/demandeurUser/demandes/enattente/existing-exceptional-products", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ products: newExceptionalProducts }),
+  
+const checkExistingExceptionalProducts = async () => {
+  try {
+    const response = await fetch("/api/demandeurUser/demandes/enattente/existing-exceptional-products", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ products: newExceptionalProducts }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error("API Error:", {
+        status: response.status,
+        statusText: response.statusText,
+        errorData,
       });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error("API Error:", {
-          status: response.status,
-          statusText: response.statusText,
-          errorData,
-        });
-        throw new Error(`Erreur lors de la vérification des produits existants: ${errorData.error || response.statusText}`);
-      }
-
-      const existingProducts = await response.json();
-      console.log("Client received duplicates:", existingProducts);
-      return existingProducts;
-    } catch (error) {
-      console.error("Erreur lors de la vérification des produits:", error);
-      toast.error( "Erreur lors de la vérification des produits existants");
-      return [];
+      throw new Error(errorData.error || `Erreur lors de la vérification des produits existants: ${response.statusText}`);
     }
-  };
 
+    const existingProducts = await response.json();
+    console.log("Client received duplicates:", existingProducts);
+    return existingProducts;
+  } catch (error: any) {
+    console.error("Erreur lors de la vérification des produits:", error);
+    toast.error(error.message || "Erreur lors de la vérification des produits existants");
+    return [];
+  }
+};
   const handleAddExceptionalRequest = async () => {
     if (!newExceptionalProducts || newExceptionalProducts.some(p => !p.name.trim() || !/[a-zA-Z]/.test(p.name))) {
       toast.error("Veuillez entrer un nom valide contenant au moins une lettre pour chaque produit exceptionnel");

@@ -3,17 +3,17 @@ import prisma from "@/lib/db";
 
 export async function POST(req: NextRequest) {
   try {
-    const { name, marque } = await req.json();
+    const { products } = await req.json();
 
-    if (!name || !marque) {
-      return NextResponse.json({ error: "Nom et marque du produit requis" }, { status: 400 });
+    if (!products || !Array.isArray(products) || products.length === 0) {
+      return NextResponse.json({ error: "Aucun produit fourni" }, { status: 400 });
     }
 
-    // Convertir le nom et la marque du nouveau produit en majuscule
-    const formattedProduct = {
-      name: name.toUpperCase(),
-      marque: marque.toUpperCase(),
-    };
+    // Convertir les noms et marques des produits envoyés en majuscule
+    const formattedProducts = products.map((product: { name: string; marque: string }) => ({
+      name: product.name.toUpperCase(),
+      marque: product.marque.toUpperCase(),
+    }));
 
     // Récupérer tous les produits de la table produit et convertir leurs nom et marque en majuscule pour la comparaison
     const regularProducts = await prisma.produit.findMany({
@@ -23,36 +23,38 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Vérifier si le produit existe dans la table produit
-    const existingRegularProduct = regularProducts.find(
-      (p) => p.nom.toUpperCase() === formattedProduct.name && p.marque.toUpperCase() === formattedProduct.marque
+    // Vérifier si les produits existent dans la table produit
+    const existingRegularProducts = regularProducts.filter((p) =>
+      formattedProducts.some(
+        (fp: { name: string; marque: string }) =>
+          p.nom.toUpperCase() === fp.name && (p.marque || "").toUpperCase() === fp.marque
+      )
     );
 
-    if (existingRegularProduct) {
-      return NextResponse.json(
-        {
-          error: `Le produit ${formattedProduct.name} (${formattedProduct.marque}) existe déjà dans la table produit`,
-        },
-        { status: 400 }
-      );
+    if (existingRegularProducts.length > 0) {
+      return NextResponse.json(existingRegularProducts, { status: 200 });
     }
 
-   
-
-    // Ajouter le nouveau produit exceptionnel
-    const newProduct = await prisma.produitExceptionnel.create({
-      data: formattedProduct,
+    // Vérifier si les produits existent dans la table produitExceptionnel
+    const existingExceptionalProducts = await prisma.produitExceptionnel.findMany({
+      where: {
+        OR: formattedProducts.map((p: { name: string; marque: string }) => ({
+          name: p.name,
+          marque: p.marque,
+        })),
+      },
+      select: {
+        name: true,
+        marque: true,
+      },
     });
 
-    return NextResponse.json({
-      message: "Produit exceptionnel ajouté avec succès",
-      product: newProduct,
-    });
+    return NextResponse.json(existingExceptionalProducts, { status: 200 });
 
   } catch (error: any) {
-    console.error("Erreur lors de la vérification du produit exceptionnel:", error);
+    console.error("Erreur lors de la vérification des produits existants:", error);
     return NextResponse.json(
-      { error: "Erreur serveur lors de la vérification du produit", details: error.message },
+      { error: "Erreur serveur lors de la vérification des produits", details: error.message },
       { status: 500 }
     );
   }
