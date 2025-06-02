@@ -3,12 +3,6 @@ import { NextResponse } from "next/server";
 
 const prisma = new PrismaClient();
 
-interface StockData {
-  [month: string]: {
-    [product: string]: number;
-  };
-}
-
 interface StockMovement {
   month: string;
   [product: string]: number | string; // string for month, number for quantities
@@ -21,125 +15,107 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     timeRange = searchParams.get("timeRange") || "12m";
 
-    console.log(`API: Fetching stock data for time range ${timeRange}`);
+    console.log(`API: Fetching stock movement data for time range ${timeRange}`);
 
-    // Générer la liste des mois selon la période sélectionnée
-    const months: string[] = [];
-    const currentDate = new Date();
-    const monthCount = timeRange === "3m" ? 3 : timeRange === "6m" ? 6 : 12;
-    
-    // Commencer par le mois actuel et remonter dans le temps
-    const startDate = new Date(currentDate);
-    startDate.setMonth(startDate.getMonth() - monthCount + 1);
-    
-    const tempDate = new Date(startDate);
-    for (let i = 0; i < monthCount; i++) {
-      months.push(
-        tempDate.toLocaleString("fr-FR", {
-          month: "short",
-          year: "numeric",
-        })
-      );
-      tempDate.setMonth(tempDate.getMonth() + 1);
-    }
+    // Define the current year
+    const currentYear = new Date().getFullYear();
+
+    // Generate months from January to December for the current year
+    const months: string[] = Array.from({ length: 12 }, (_, i) => {
+      const date = new Date(currentYear, i, 1);
+      return date.toLocaleString("fr-FR", {
+        month: "short",
+        year: "numeric",
+      });
+    });
 
     console.log(`API: Generated months: ${months.join(", ")}`);
 
-    // Récupérer tous les produits avec leurs quantités actuelles
-    const produits = await prisma.produit.findMany({
-      select: {
-        nom: true,
-        quantite: true, // Supposant que vous avez un champ quantite dans votre modèle Produit
-      },
-    });
+    // Determine the start date based on timeRange
+    const monthCount = timeRange === "3m" ? 3 : timeRange === "6m" ? 6 : 12;
+    const startMonthIndex = Math.max(0, 12 - monthCount);
+    const filteredMonths = months.slice(startMonthIndex);
 
-    console.log(`API: Found ${produits.length} products`);
+    console.log(`API: Filtered months for timeRange ${timeRange}: ${filteredMonths.join(", ")}`);
 
-    // Si vous n'avez pas de champ quantite, récupérer depuis les commandes
-    if (produits.length === 0 || !produits[0].hasOwnProperty('quantite')) {
-      // Alternative: calculer les quantités depuis les commandes
-      const commandes = await prisma.commande.findMany({
-        where: {
-          statut: "LIVREE",
+    // Fetch delivered orders (Commande with LIVREE status) for the current year
+    const commandes = await prisma.commande.findMany({
+      where: {
+        statut: "LIVREE",
+        dateLivraison: {
+          gte: new Date(currentYear, 0, 1), // Start of the year
+          lte: new Date(currentYear, 11, 31, 23, 59, 59), // End of the year
         },
-        include: {
-          produits: {
-            include: {
-              produit: true,
+      },
+      include: {
+        produits: {
+          include: {
+            produit: {
+              select: {
+                nom: true,
+              },
             },
           },
         },
+      },
+    });
+
+    console.log(`API: Found ${commandes.length} delivered orders`);
+
+    // Aggregate quantities by product and month
+    const stockData: { [month: string]: { [product: string]: number } } = {};
+    filteredMonths.forEach((month) => {
+      stockData[month] = {};
+    });
+
+    const allProducts = new Set<string>();
+    commandes.forEach((commande) => {
+      if (!commande.dateLivraison) return;
+      const deliveryMonth = commande.dateLivraison.toLocaleString("fr-FR", {
+        month: "short",
+        year: "numeric",
       });
 
-      // Agréger les quantités totales par produit
-      const productQuantities: { [productName: string]: number } = {};
-      
-      commandes.forEach((commande) => {
-        commande.produits.forEach((cp) => {
-          const productName = cp.produit.nom;
-          if (!productQuantities[productName]) {
-            productQuantities[productName] = 0;
-          }
-          productQuantities[productName] += cp.quantite;
-        });
-      });
+      if (!filteredMonths.includes(deliveryMonth)) return;
 
-      // Convertir en format produits
-      const calculatedProducts = Object.keys(productQuantities).map(nom => ({
-        nom,
-        quantite: productQuantities[nom]
-      }));
+      commande.produits.forEach((cp) => {
+        const productName = cp.produit.nom;
+        allProducts.add(productName);
 
-      console.log(`API: Calculated quantities for ${calculatedProducts.length} products`);
-
-      // Préparer les données de réponse avec les mêmes quantités pour chaque mois
-      const responseData: StockMovement[] = months.map((month) => {
-        const monthData: StockMovement = { month };
-        
-        calculatedProducts.forEach((produit) => {
-          monthData[produit.nom] = produit.quantite;
-        });
-        
-        return monthData;
-      });
-
-      console.log("API: Response data:", JSON.stringify(responseData, null, 2));
-      return NextResponse.json(responseData, { 
-        status: 200,
-        headers: {
-          'Content-Type': 'application/json',
+        if (!stockData[deliveryMonth][productName]) {
+          stockData[deliveryMonth][productName] = 0;
         }
+        stockData[deliveryMonth][productName] += cp.quantite;
       });
-    }
+    });
 
-    // Si vous avez un champ quantite dans le modèle Produit
-    const responseData: StockMovement[] = months.map((month) => {
+    console.log(`API: Aggregated stock data for ${allProducts.size} products`);
+
+    // Prepare response data
+    const responseData: StockMovement[] = filteredMonths.map((month) => {
       const monthData: StockMovement = { month };
-      
-      produits.forEach((produit) => {
-        monthData[produit.nom] = produit.quantite || 0;
+      allProducts.forEach((product) => {
+        monthData[product] = stockData[month][product] || 0;
       });
-      
       return monthData;
     });
 
     console.log("API: Response data:", JSON.stringify(responseData, null, 2));
 
-    return NextResponse.json(responseData, { 
+    return NextResponse.json(responseData, {
       status: 200,
       headers: {
-        'Content-Type': 'application/json',
-      }
+        "Content-Type": "application/json",
+      },
     });
-
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.error(`API Error: Failed to process stock data for timeRange ${timeRange}:`, error);
+    console.error(`API Error: Failed to process stock movement data for timeRange ${timeRange}:`, error);
     return NextResponse.json(
       {
-        error: "Erreur lors de la récupération des données de stock",
+        error: "Erreur lors de la récupération des données de mouvement de stock",
         details: errMsg,
-        timeRange: timeRange,
+        timeRange,
       },
       { status: 500 }
     );
