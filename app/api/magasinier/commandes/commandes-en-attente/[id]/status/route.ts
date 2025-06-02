@@ -6,12 +6,13 @@ import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { StatutProduit } from "@prisma/client";
 
-// Fonction pour s'assurer que le répertoire existe
 async function ensureDirectoryExists(dir: string) {
   try {
     await mkdir(dir, { recursive: true });
+    console.log(`Directory ensured: ${dir}`);
   } catch (error) {
-    throw new Error(`Failed to create directory: ${dir}`);
+    console.error(`Failed to create/access directory ${dir}:`, error);
+    throw new Error(`Unable to create/access directory: ${dir}`);
   }
 }
 
@@ -62,8 +63,21 @@ export async function PUT(
     const factureFile = formData.get("facture") as File | null;
     let facturePath: string | undefined;
 
-    if (factureFile && statut === "LIVREE" && factureFile.size > 0) {
-      // Validate file type
+    if (factureFile && statut === "LIVREE") {
+      // Log file details
+      console.log("Facture file details:", {
+        name: factureFile.name,
+        size: factureFile.size,
+        type: factureFile.type,
+      });
+
+      // Validate file
+      if (factureFile.size === 0) {
+        return NextResponse.json(
+          { error: "Le fichier facture est vide" },
+          { status: 400 }
+        );
+      }
       if (factureFile.type !== "application/pdf") {
         return NextResponse.json(
           { error: "Le fichier doit être un PDF" },
@@ -73,20 +87,34 @@ export async function PUT(
 
       try {
         const uploadsDir = path.join(process.cwd(), "public", "uploads", "factures");
+        console.log("Target directory:", uploadsDir);
+
+        // Ensure directory exists
         await ensureDirectoryExists(uploadsDir);
 
+        // Generate unique filename
         const fileName = `facture-${commande.id}-${uuidv4()}.pdf`;
         const filePath = path.join(uploadsDir, fileName);
+        console.log("Target file path:", filePath);
 
+        // Convert file to buffer
         const fileBuffer = Buffer.from(await factureFile.arrayBuffer());
-        await writeFile(filePath, fileBuffer);
+        console.log("File buffer size:", fileBuffer.length);
 
+        // Write file
+        await writeFile(filePath, fileBuffer);
+        console.log("File written successfully:", filePath);
+
+        // Set facture path
         facturePath = `/uploads/factures/${fileName}`;
         updateData.facture = facturePath;
       } catch (fileError) {
         console.error("Erreur lors du traitement du fichier:", fileError);
         return NextResponse.json(
-          { error: "Erreur lors de l'enregistrement de la facture" },
+          {
+            error: "Erreur lors de l'enregistrement de la facture",
+            details: fileError instanceof Error ? fileError.message : "Unknown error",
+          },
           { status: 500 }
         );
       }
@@ -126,8 +154,10 @@ export async function PUT(
     // Handle return (EN_RETOUR)
     if (statut === "EN_RETOUR" && raisonRetour) {
       console.log("Raison du retour:", raisonRetour);
-      // Note: If you want to store raisonRetour, add it to the Prisma schema
     }
+
+    // Log update data
+    console.log("Update data:", updateData);
 
     // Update the commande
     const updatedOrder = await prisma.commande.update({
@@ -139,7 +169,10 @@ export async function PUT(
   } catch (error) {
     console.error("Erreur lors de la mise à jour du statut de la commande:", error);
     return NextResponse.json(
-      { error: "Erreur lors de la mise à jour du statut de la commande" },
+      {
+        error: "Erreur lors de la mise à jour du statut de la commande",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
       { status: 500 }
     );
   }
