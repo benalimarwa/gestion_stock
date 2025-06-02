@@ -76,6 +76,9 @@ export async function POST(req: NextRequest) {
         remarque: data.remarque?.trim() || null,
         categorieId: data.categorieId,
       },
+      include:{
+        categorie:true
+      }
     });
 
     return NextResponse.json(product, { status: 201 });
