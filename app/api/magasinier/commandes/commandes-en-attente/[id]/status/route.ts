@@ -67,6 +67,8 @@ export async function PUT(
 // Alternative simple - remplacez seulement la partie de gestion du fichier
 // Solution temporaire : stocker juste le nom du fichier sans le sauvegarder physiquement
 
+// Alternative simple - remplacez seulement la partie de gestion du fichier
+
 if (factureFile && statut === "LIVREE") {
   console.log("Facture file details:", {
     name: factureFile.name,
@@ -89,26 +91,50 @@ if (factureFile && statut === "LIVREE") {
   }
 
   try {
-    // SOLUTION TEMPORAIRE : On stocke juste le nom du fichier dans la DB
-    // sans le sauvegarder physiquement pour éviter les erreurs de permission
-    const fileName = `facture-${commande.id}-${uuidv4()}.pdf`;
+    // SOLUTION ALTERNATIVE : Utiliser le dossier tmp du système
+    const os = require('os');
+    const uploadsDir = path.join(os.tmpdir(), 'app-factures');
     
-    // Pour l'instant, on stocke juste le nom du fichier
-    // Vous pourrez implémenter la sauvegarde physique plus tard
-    facturePath = fileName;
+    console.log("Using temp directory:", uploadsDir);
+    
+    // Cette méthode devrait toujours fonctionner
+    try {
+      await mkdir(uploadsDir, { recursive: true });
+    } catch (mkdirError) {
+      console.log("mkdir error (may be normal if dir exists):", mkdirError instanceof Error ? mkdirError.message : String(mkdirError));
+    }
+
+    // Generate unique filename
+    const fileName = `facture-${commande.id}-${uuidv4()}.pdf`;
+    const filePath = path.join(uploadsDir, fileName);
+    console.log("Target file path:", filePath);
+
+    // Convert file to buffer
+    const fileBuffer = Buffer.from(await factureFile.arrayBuffer());
+    console.log("File buffer size:", fileBuffer.length);
+
+    // Write file
+    await writeFile(filePath, fileBuffer);
+    console.log("File written successfully to temp:", filePath);
+
+    // Pour la base de données, on stocke juste le nom du fichier
+    // (vous pourrez plus tard le déplacer ou implémenter une logique différente)
+    facturePath = fileName; // Juste le nom du fichier
     updateData.facture = facturePath;
     
-    console.log("File name stored in database:", fileName);
-    console.log("Note: Physical file not saved - feature temporarily disabled");
+    console.log("SUCCESS: File saved to temp directory");
 
   } catch (fileError) {
-    const errorMessage = fileError instanceof Error ? fileError.message : String(fileError);
-    console.error("Erreur lors du traitement du fichier:", errorMessage);
-    
+    console.error("Erreur lors du traitement du fichier:", fileError);
     return NextResponse.json(
       {
         error: "Erreur lors de l'enregistrement de la facture",
-        details: errorMessage,
+        details: fileError instanceof Error ? fileError.message : "Unknown error",
+        debug: {
+          step: "file_processing",
+          cwd: process.cwd(),
+          tmpdir: require('os').tmpdir(),
+        }
       },
       { status: 500 }
     );
