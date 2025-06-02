@@ -1,18 +1,17 @@
-// app/api/magasinier/commandes/commandes-en-attente/[id]/status/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/db";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
-import { StatutProduit } from "@prisma/client";
+import { StatutProduit, StatutCommande } from "@prisma/client";
 
 async function ensureDirectoryExists(dir: string) {
   try {
     await mkdir(dir, { recursive: true });
-    console.log(`Directory ensured: ${dir}`);
+    console.log(`Directory ${dir} ensured`);
   } catch (error) {
-    console.error(`Failed to create/access directory ${dir}:`, error);
-    throw new Error(`Unable to create/access directory: ${dir}`);
+    console.error(`Failed to create directory ${dir}:`, error);
+    throw new Error(`Unable to create directory ${dir}`);
   }
 }
 
@@ -25,19 +24,30 @@ export async function PUT(
 
     // Parse FormData
     const formData = await request.formData();
-    const statut = formData.get("statut") as string;
+    const statutInput = formData.get("statut") as string;
     const raisonRetour = formData.get("raisonRetour") as string | null;
 
-    // Validate statut
-    const validStatuts = ["LIVREE", "EN_RETOUR", "ANNULEE"];
+    // Validate statut against StatutCommande enum
+    const validStatuts: StatutCommande[] = [
+      StatutCommande.LIVREE,
+      StatutCommande.EN_RETOUR,
+      StatutCommande.ANNULEE,
+    ];
+    if (!Object.values(StatutCommande).includes(statutInput as StatutCommande)) {
+      return NextResponse.json(
+        { error: "Statut de commande non valide" },
+        { status: 400 }
+      );
+    }
+    const statut = statutInput as StatutCommande;
     if (!validStatuts.includes(statut)) {
       return NextResponse.json(
-        { error: "Statut de commande invalide" },
+        { error: "Statut de commande non autorisé pour cette mise à jour" },
         { status: 400 }
       );
     }
 
-    // Fetch the commande
+    // Fetch the command
     const commande = await prisma.commande.findUnique({
       where: { id },
       include: {
@@ -56,67 +66,68 @@ export async function PUT(
       );
     }
 
-    // Prepare update data
-    const updateData: any = { statut };
+    // Prepare update data with explicit type
+    const updateData: {
+      statut: StatutCommande;
+      facture?: string;
+      dateLivraison?: Date;
+      raisonRetour?: string | null;
+    } = { statut };
 
     // Handle facture file upload
     const factureFile = formData.get("facture") as File | null;
-    let facturePath: string | undefined;
 
-    // Remplacez cette partie dans votre code :
-// Alternative simple - remplacez seulement la partie de gestion du fichier
-// Solution temporaire : stocker juste le nom du fichier sans le sauvegarder physiquement
+    if (factureFile && statut === StatutCommande.LIVREE) {
+      console.log("Facture file details:", {
+        name: factureFile.name,
+        size: factureFile.size,
+        type: factureFile.type,
+      });
 
-if (factureFile && statut === "LIVREE") {
-  console.log("Facture file details:", {
-    name: factureFile.name,
-    size: factureFile.size,
-    type: factureFile.type,
-  });
+      // Validate file
+      if (factureFile.size === 0) {
+        return NextResponse.json(
+          { error: "Le fichier facture est vide" },
+          { status: 400 }
+        );
+      }
+      if (factureFile.type !== "application/pdf") {
+        return NextResponse.json(
+          { error: "Le fichier doit être un PDF" },
+          { status: 400 }
+        );
+      }
 
-  // Validate file
-  if (factureFile.size === 0) {
-    return NextResponse.json(
-      { error: "Le fichier facture est vide" },
-      { status: 400 }
-    );
-  }
-  if (factureFile.type !== "application/pdf") {
-    return NextResponse.json(
-      { error: "Le fichier doit être un PDF" },
-      { status: 400 }
-    );
-  }
+      try {
+        // Define storage directory
+        const storageDir = path.join(process.cwd(), "public/factures");
+        await ensureDirectoryExists(storageDir);
 
-  try {
-    // SOLUTION TEMPORAIRE : On stocke juste le nom du fichier dans la DB
-    // sans le sauvegarder physiquement pour éviter les erreurs de permission
-    const fileName = `facture-${commande.id}-${uuidv4()}.pdf`;
-    
-    // Pour l'instant, on stocke juste le nom du fichier
-    // Vous pourrez implémenter la sauvegarde physique plus tard
-    facturePath = fileName;
-    updateData.facture = facturePath;
-    
-    console.log("File name stored in database:", fileName);
-    console.log("Note: Physical file not saved - feature temporarily disabled");
+        // Generate unique filename
+        const fileName = `facture-${commande.id}-${uuidv4()}.pdf`;
+        const facturePath = path.join("/factures", fileName);
 
-  } catch (fileError) {
-    const errorMessage = fileError instanceof Error ? fileError.message : String(fileError);
-    console.error("Erreur lors du traitement du fichier:", errorMessage);
-    
-    return NextResponse.json(
-      {
-        error: "Erreur lors de l'enregistrement de la facture",
-        details: errorMessage,
-      },
-      { status: 500 }
-    );
-  }
-}
+        // Save file
+        const buffer = Buffer.from(await factureFile.arrayBuffer());
+        const filePath = path.join(storageDir, fileName);
+        await writeFile(filePath, buffer);
+        console.log("Facture file saved to:", filePath);
+
+        updateData.facture = facturePath;
+      } catch (fileError) {
+        console.error("Erreur lors de l'enregistrement du fichier:", fileError);
+        return NextResponse.json(
+          {
+            error: "Erreur lors de l'enregistrement de la facture",
+            details: fileError instanceof Error ? fileError.message : String(fileError),
+          },
+          { status: 500 }
+        );
+      }
+    }
 
     // Handle delivery (LIVREE)
-    if (statut === "LIVREE") {
+    if (statut === StatutCommande.LIVREE) {
       updateData.dateLivraison = new Date();
 
       for (const item of commande.produits) {
@@ -147,12 +158,13 @@ if (factureFile && statut === "LIVREE") {
     }
 
     // Handle return (EN_RETOUR)
-    if (statut === "EN_RETOUR" && raisonRetour) {
+    if (statut === StatutCommande.EN_RETOUR && raisonRetour) {
+      updateData.raisonRetour = raisonRetour;
       console.log("Raison du retour:", raisonRetour);
     }
 
     // Log update data
-    console.log("Update data:", updateData);
+    console.log("Update data:", JSON.stringify(updateData, null, 2));
 
     // Update the commande
     const updatedOrder = await prisma.commande.update({
@@ -161,12 +173,13 @@ if (factureFile && statut === "LIVREE") {
     });
 
     return NextResponse.json(updatedOrder);
+
   } catch (error) {
     console.error("Erreur lors de la mise à jour du statut de la commande:", error);
     return NextResponse.json(
       {
-        error: "Erreur lors de la mise à jour du statut de la commande",
-        details: error instanceof Error ? error.message : "Unknown error",
+        error: "Erreur lors de la mise à jour du statut de commande",
+        details: error instanceof Error ? error.message : "Erreur inconnue",
       },
       { status: 500 }
     );

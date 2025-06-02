@@ -1,6 +1,7 @@
-// app/api/magasinier/commandes/facture/[id]/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/db";
+import { stat } from "fs/promises";
+import path from "path";
 
 export async function GET(
   request: NextRequest,
@@ -8,10 +9,10 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    
+
     console.log("Recherche de la facture pour la commande ID:", id);
 
-    // Vérifier d'abord si la commande existe
+    // Fetch commande
     const commande = await prisma.commande.findUnique({
       where: {
         id: id,
@@ -43,24 +44,34 @@ export async function GET(
 
     console.log("Facture trouvée:", commande.facture);
 
-    // Vérifier si le chemin de la facture est valide
-    // Vous pouvez ajouter une validation supplémentaire ici
-    if (typeof commande.facture !== 'string' || commande.facture.trim() === '') {
+    // Validate file exists
+    const filePath = path.join(process.cwd(), "public", commande.facture);
+    try {
+      await stat(filePath);
+    } catch (err) {
+      console.error("Facture fichier non trouvé sur le disque:", filePath);
       return NextResponse.json(
-        { error: "Chemin de facture invalide" },
-        { status: 400 }
+        { error: "Fichier de la facture non trouvé sur le serveur" },
+        { status: 404 }
       );
     }
 
-    return NextResponse.json({ 
-      facturePath: commande.facture,
-      commandeId: commande.id 
+    // Construct the public URL
+    const factureUrl = `/public${commande.facture}`;
+    console.log("URL de la facture:", factureUrl);
+
+    return NextResponse.json({
+      facturePath: factureUrl,
+      commandeId: commande.id,
     });
 
   } catch (error) {
     console.error("Erreur lors de la récupération de la facture:", error);
     return NextResponse.json(
-      { error: "Erreur interne du serveur" },
+      {
+        error: "Erreur interne du serveur",
+        details: error instanceof Error ? error.message : "Erreur inconnue",
+      },
       { status: 500 }
     );
   }
