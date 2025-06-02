@@ -91,18 +91,41 @@ export async function DELETE(request: Request) {
     const url = new URL(request.url);
     const id = url.searchParams.get("id");
 
-    if (!id) {
-      return NextResponse.json({ error: "ID requis" }, { status: 400 });
+    if (!id || typeof id !== 'string') {
+      return NextResponse.json({ error: "ID requis et valide" }, { status: 400 });
     }
 
+    // Vérifier si le fournisseur existe avant de le supprimer
+    const existingFournisseur = await prisma.fournisseur.findUnique({
+      where: { id },
+    });
+
+    if (!existingFournisseur) {
+      return NextResponse.json({ error: "Fournisseur non trouvé" }, { status: 404 });
+    }
+
+    // Supprimer directement le fournisseur
+    // Les relations seront gérées par Prisma selon la configuration du schéma
     await prisma.fournisseur.delete({
       where: { id },
     });
 
-    return NextResponse.json({ message: "Fournisseur supprimé" });
+    return NextResponse.json({ message: "Fournisseur supprimé avec succès" });
   } catch (error) {
     console.error("Erreur DELETE /api/admin/fournisseur:", error);
-    return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
+    
+    // Gérer les erreurs de contrainte de clé étrangère
+    if (error instanceof Error && error.message.includes('Foreign key constraint')) {
+      return NextResponse.json(
+        { error: "Impossible de supprimer: le fournisseur est lié à d'autres données" }, 
+        { status: 409 }
+      );
+    }
+
+    return NextResponse.json(
+      { error: "Erreur serveur", details: error instanceof Error ? error.message : "Erreur inconnue" }, 
+      { status: 500 }
+    );
   } finally {
     await prisma.$disconnect();
   }
