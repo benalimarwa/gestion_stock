@@ -1,5 +1,4 @@
 "use client";
-
 import * as React from "react";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import {
@@ -31,7 +30,10 @@ interface CustomChartConfig {
     color?: string;
   };
 }
-
+interface StockMovement {
+  month: string;
+  [product: string]: number | string; // Allow string for month, number for product quantities
+}
 export function MouvementStock() {
   const [timeRange, setTimeRange] = React.useState("12m");
   const [chartData, setChartData] = React.useState([]);
@@ -65,16 +67,25 @@ export function MouvementStock() {
         );
         if (!response.ok) {
           const errorData = await response.json();
-          throw new Error(`${errorData.error || 'Erreur lors de la récupération des données'}${errorData.details ? `: ${errorData.details}` : ''}`);
+          throw new Error(
+            `${errorData.error || "Erreur lors de la récupération des données"}${
+              errorData.details ? `: ${errorData.details}` : ""
+            }`
+          );
         }
         const data = await response.json();
+        console.log(
+          `Frontend: Stock movement data for timeRange=${timeRange}:`,
+          JSON.stringify(data, null, 2)
+        );
 
         // Determine the expected number of months
         const expectedMonths = timeRange === "3m" ? 3 : timeRange === "6m" ? 6 : 12;
 
-        // Filter the data to ensure only the expected number of months is displayed
+        // Filter data to ensure only the expected number of months
         const filteredData = data.slice(-expectedMonths);
 
+        // Get unique products
         const products = Array.from(
           new Set(
             filteredData.flatMap((item: { [key: string]: number }) =>
@@ -83,6 +94,7 @@ export function MouvementStock() {
           )
         ) as string[];
 
+        // Update chart config
         const updatedConfig: CustomChartConfig = {
           stock: { label: "Stock" },
         };
@@ -96,8 +108,12 @@ export function MouvementStock() {
         setChartConfig(updatedConfig);
         setChartData(filteredData);
       } catch (error) {
-        console.error("Erreur:", error);
-        setError('Erreur inconnue lors de la récupération des données');
+        console.error("Frontend Error:", error);
+        setError(
+          error instanceof Error
+            ? error.message
+            : "Erreur inconnue lors de la récupération des données"
+        );
       } finally {
         setLoading(false);
       }
@@ -110,8 +126,8 @@ export function MouvementStock() {
       <Card>
         <CardHeader className="flex items-center gap-2 space-y-0 border-b py-5 sm:flex-row">
           <div className="grid flex-1 gap-1 text-center sm:text-left">
-            <CardTitle>Stock Movement - Suivi des Stocks</CardTitle>
-            <CardDescription>Showing stock levels per product over time</CardDescription>
+            <CardTitle>Mouvement de Stock</CardTitle>
+            <CardDescription>Quantité de produits reçus par mois</CardDescription>
           </div>
         </CardHeader>
         <CardContent className="px-2 pt-4 sm:px-6 sm:pt-6">
@@ -128,8 +144,8 @@ export function MouvementStock() {
       <Card>
         <CardHeader className="flex items-center gap-2 space-y-0 border-b py-5 sm:flex-row">
           <div className="grid flex-1 gap-1 text-center sm:text-left">
-            <CardTitle>Stock Movement - Suivi des Stocks</CardTitle>
-            <CardDescription>Showing stock levels per product over time</CardDescription>
+            <CardTitle>Mouvement de Stock</CardTitle>
+            <CardDescription>Quantité de produits reçus par mois</CardDescription>
           </div>
         </CardHeader>
         <CardContent className="px-2 pt-4 sm:px-6 sm:pt-6">
@@ -146,8 +162,8 @@ export function MouvementStock() {
       <Card>
         <CardHeader className="flex items-center gap-2 space-y-0 border-b py-5 sm:flex-row">
           <div className="grid flex-1 gap-1 text-center sm:text-left">
-            <CardTitle>Stock Movement - Suivi des Stocks</CardTitle>
-            <CardDescription>Showing stock levels per product over time</CardDescription>
+            <CardTitle>Mouvement de Stock</CardTitle>
+            <CardDescription>Quantité de produits reçus par mois</CardDescription>
           </div>
           <Select value={timeRange} onValueChange={setTimeRange}>
             <SelectTrigger
@@ -171,7 +187,9 @@ export function MouvementStock() {
         </CardHeader>
         <CardContent className="px-2 pt-4 sm:px-6 sm:pt-6">
           <div className="flex items-center justify-center h-[250px]">
-            <p className="text-gray-500">Aucune donnée de stock disponible pour cette période.</p>
+            <p className="text-gray-500">
+              Aucune quantité de produit disponible pour cette période. Vérifiez les commandes livrées.
+            </p>
           </div>
         </CardContent>
       </Card>
@@ -182,8 +200,8 @@ export function MouvementStock() {
     <Card>
       <CardHeader className="flex items-center gap-2 space-y-0 border-b py-5 sm:flex-row">
         <div className="grid flex-1 gap-1 text-center sm:text-left">
-          <CardTitle>Stock Movement - Suivi des Stocks</CardTitle>
-          <CardDescription>Showing stock levels per product over time</CardDescription>
+          <CardTitle>Mouvement de Stock</CardTitle>
+          <CardDescription>Quantité de produits reçus par mois</CardDescription>
         </div>
         <Select value={timeRange} onValueChange={setTimeRange}>
           <SelectTrigger
@@ -223,10 +241,7 @@ export function MouvementStock() {
                 tickFormatter={(value) => value.slice(0, 3)}
               />
               <YAxis />
-              <ChartTooltip
-                cursor={false}
-                content={<ChartTooltipContent />}
-              />
+              <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
               {(Object.keys(chartConfig) as string[])
                 .filter((key) => key !== "stock")
                 .map((product) => (
