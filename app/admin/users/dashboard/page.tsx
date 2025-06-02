@@ -492,7 +492,7 @@ const createReportingEntry = async (reportType: string) => {
     try {
       const query = timeRange ? `?productId=${productId}&timeRange=${timeRange}` : `?productId=${productId}`;
       const orderStatsResponse = await fetch(`/api/dashboard/commandes-par-produit-mois${query}`);
-      const stockMovementsResponse = await fetch(`/api/dashboard/qte-prod-entre-sort${query}`);
+      const stockMovementsResponse = await fetch(`/api/dashboard/stock-mouvement${query}`);
       if (!orderStatsResponse.ok) throw new Error("Erreur lors de la récupération des statistiques des commandes");
       if (!stockMovementsResponse.ok) throw new Error("Erreur lors de la récupération des mouvements de stock");
       const orderStatsData = await orderStatsResponse.json();
