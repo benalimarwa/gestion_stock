@@ -7,31 +7,60 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const {id:id} = await params;
+    const { id } = await params;
     
+    console.log("Recherche de la facture pour la commande ID:", id);
+
+    // Vérifier d'abord si la commande existe
     const commande = await prisma.commande.findUnique({
       where: {
         id: id,
       },
       select: {
+        id: true,
         facture: true,
+        statut: true,
       },
     });
 
-    if (!commande || !commande.facture) {
+    console.log("Commande trouvée:", commande);
+
+    if (!commande) {
+      console.log("Commande non trouvée avec l'ID:", id);
       return NextResponse.json(
-        { error: "Facture non trouvée" },
+        { error: "Commande non trouvée" },
         { status: 404 }
       );
     }
 
-    // Si vous stockez le chemin du fichier dans la base de données
-    return NextResponse.json({ facturePath: commande.facture });
-    
+    if (!commande.facture) {
+      console.log("Facture non disponible pour la commande:", id);
+      return NextResponse.json(
+        { error: "Facture non disponible pour cette commande" },
+        { status: 404 }
+      );
+    }
+
+    console.log("Facture trouvée:", commande.facture);
+
+    // Vérifier si le chemin de la facture est valide
+    // Vous pouvez ajouter une validation supplémentaire ici
+    if (typeof commande.facture !== 'string' || commande.facture.trim() === '') {
+      return NextResponse.json(
+        { error: "Chemin de facture invalide" },
+        { status: 400 }
+      );
+    }
+
+    return NextResponse.json({ 
+      facturePath: commande.facture,
+      commandeId: commande.id 
+    });
+
   } catch (error) {
     console.error("Erreur lors de la récupération de la facture:", error);
     return NextResponse.json(
-      { error: "Erreur lors de la récupération de la facture" },
+      { error: "Erreur interne du serveur" },
       { status: 500 }
     );
   }

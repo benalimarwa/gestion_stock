@@ -144,30 +144,55 @@ export function DeliveredOrdersTable() {
       year: "numeric",
     });
   };
+// Ajoutez cette fonction améliorée dans votre composant DeliveredOrdersTable
 
-  const handleViewFacture = async (orderId: string) => {
-    try {
-      setFactureLoading(true);
-      setFactureError(null);
-      const response = await fetch(`/api/magasinier/commandes/facture/${orderId}`);
-      if (!response.ok) {
-        throw new Error("Erreur lors de la récupération de la facture");
-      }
-      const data = await response.json();
-      if (data.facturePath) {
-        setFacturePath(data.facturePath);
-        setFactureModalOpen(true);
+const handleViewFacture = async (orderId: string) => {
+  try {
+    setFactureLoading(true);
+    setFactureError(null);
+    
+    console.log("Tentative de récupération de la facture pour:", orderId);
+    
+    const response = await fetch(`/api/magasinier/commandes/facture/${orderId}`);
+    
+    console.log("Réponse du serveur:", response.status, response.statusText);
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error("Erreur de l'API:", errorData);
+      
+      if (response.status === 404) {
+        throw new Error(errorData.error || "Facture non trouvée");
       } else {
-        throw new Error("Chemin de facture non disponible");
+        throw new Error(`Erreur ${response.status}: ${errorData.error || "Erreur inconnue"}`);
       }
-    } catch (err) {
-      setFactureError("Impossible de charger la facture");
-      console.error(err);
-      toast.error("Impossible de charger la facture");
-    } finally {
-      setFactureLoading(false);
     }
-  };
+    
+    const data = await response.json();
+    console.log("Données reçues:", data);
+    
+    if (data.facturePath) {
+      setFacturePath(data.facturePath);
+      setFactureModalOpen(true);
+    } else {
+      throw new Error("Chemin de facture non disponible dans la réponse");
+    }
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : "Erreur inconnue";
+    console.error("Erreur complète:", err);
+    setFactureError(errorMessage);
+    toast.error(errorMessage);
+  } finally {
+    setFactureLoading(false);
+  }
+};
+
+// Fonction pour vérifier les données de commandes
+const debugOrderData = () => {
+  console.log("Toutes les commandes:", deliveredOrders);
+  console.log("Commandes avec factures:", deliveredOrders.filter(order => order.facture));
+  console.log("Commandes sans factures:", deliveredOrders.filter(order => !order.facture));
+};
 
   const openFactureInNewTab = () => {
     if (facturePath) {
