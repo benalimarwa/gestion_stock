@@ -63,62 +63,99 @@ export async function PUT(
     const factureFile = formData.get("facture") as File | null;
     let facturePath: string | undefined;
 
-    if (factureFile && statut === "LIVREE") {
-      // Log file details
-      console.log("Facture file details:", {
-        name: factureFile.name,
-        size: factureFile.size,
-        type: factureFile.type,
-      });
+    // Remplacez cette partie dans votre code :
+if (factureFile && statut === "LIVREE") {
+  console.log("Facture file details:", {
+    name: factureFile.name,
+    size: factureFile.size,
+    type: factureFile.type,
+  });
 
-      // Validate file
-      if (factureFile.size === 0) {
-        return NextResponse.json(
-          { error: "Le fichier facture est vide" },
-          { status: 400 }
-        );
-      }
-      if (factureFile.type !== "application/pdf") {
-        return NextResponse.json(
-          { error: "Le fichier doit être un PDF" },
-          { status: 400 }
-        );
-      }
+  // Validate file
+  if (factureFile.size === 0) {
+    return NextResponse.json(
+      { error: "Le fichier facture est vide" },
+      { status: 400 }
+    );
+  }
+  if (factureFile.type !== "application/pdf") {
+    return NextResponse.json(
+      { error: "Le fichier doit être un PDF" },
+      { status: 400 }
+    );
+  }
 
-      try {
-        const uploadsDir = path.join(process.cwd(), "public", "uploads", "factures");
-        console.log("Target directory:", uploadsDir);
+  try {
+    // Option 1: Utiliser le dossier public (original)
+    const uploadsDir = path.join(process.cwd(), "public", "uploads", "factures");
+    
+    // Option 2: Alternative avec dossier temporaire (si Option 1 ne marche pas)
+    // const os = require('os');
+    // const uploadsDir = path.join(os.tmpdir(), 'app-uploads', 'factures');
+    
+    console.log("Target directory:", uploadsDir);
+    console.log("Current working directory:", process.cwd());
+    console.log("Process platform:", process.platform);
+    console.log("Process user:", process.getuid ? process.getuid() : 'N/A');
 
-        // Ensure directory exists
-        await ensureDirectoryExists(uploadsDir);
+    // Ensure directory exists
+    await ensureDirectoryExists(uploadsDir);
 
-        // Generate unique filename
-        const fileName = `facture-${commande.id}-${uuidv4()}.pdf`;
-        const filePath = path.join(uploadsDir, fileName);
-        console.log("Target file path:", filePath);
+    // Generate unique filename
+    const fileName = `facture-${commande.id}-${uuidv4()}.pdf`;
+    const filePath = path.join(uploadsDir, fileName);
+    console.log("Target file path:", filePath);
 
-        // Convert file to buffer
-        const fileBuffer = Buffer.from(await factureFile.arrayBuffer());
-        console.log("File buffer size:", fileBuffer.length);
+    // Convert file to buffer
+    const fileBuffer = Buffer.from(await factureFile.arrayBuffer());
+    console.log("File buffer size:", fileBuffer.length);
 
-        // Write file
-        await writeFile(filePath, fileBuffer);
-        console.log("File written successfully:", filePath);
-
-        // Set facture path
-        facturePath = `/uploads/factures/${fileName}`;
-        updateData.facture = facturePath;
-      } catch (fileError) {
-        console.error("Erreur lors du traitement du fichier:", fileError);
-        return NextResponse.json(
-          {
-            error: "Erreur lors de l'enregistrement de la facture",
-            details: fileError instanceof Error ? fileError.message : "Unknown error",
-          },
-          { status: 500 }
-        );
-      }
+    // Vérifier que le buffer n'est pas vide
+    if (fileBuffer.length === 0) {
+      throw new Error("File buffer is empty");
     }
+
+    // Write file avec gestion d'erreur plus détaillée
+    try {
+      await writeFile(filePath, fileBuffer);
+      console.log("File written successfully:", filePath);
+      
+      // Vérifier que le fichier a été créé
+      const fs = require('fs');
+      const fileExists = fs.existsSync(filePath);
+      console.log("File exists after write:", fileExists);
+      
+      if (!fileExists) {
+        throw new Error("File was not created successfully");
+      }
+      
+    } catch (writeError) {
+      console.error("Error writing file:", writeError);
+      throw new Error(`Failed to write file: ${writeError instanceof Error ? writeError.message : 'Unknown write error'}`);
+    }
+
+    // Set facture path
+    facturePath = `/uploads/factures/${fileName}`;
+    updateData.facture = facturePath;
+    
+  } catch (fileError) {
+    console.error("Erreur lors du traitement du fichier:", fileError);
+    console.error("File error stack:", fileError instanceof Error ? fileError.stack : 'No stack trace');
+    
+    return NextResponse.json(
+      {
+        error: "Erreur lors de l'enregistrement de la facture",
+        details: fileError instanceof Error ? fileError.message : "Unknown error",
+        debug: {
+          cwd: process.cwd(),
+          platform: process.platform,
+          nodeVersion: process.version
+        }
+      },
+      { status: 500 }
+    );
+  }
+}
 
     // Handle delivery (LIVREE)
     if (statut === "LIVREE") {

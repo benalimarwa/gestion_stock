@@ -163,20 +163,22 @@ export function OngoingOrdersTable() {
     }
   };
 
-  const deliverOrder = async () => {
+ const deliverOrder = async () => {
   if (!orderToDeliver) return;
+  
   try {
     setProcessingOrder(orderToDeliver);
     const formData = new FormData();
     formData.append("statut", "LIVREE");
-
+    
     if (invoiceFile) {
       console.log("Frontend file details:", {
         name: invoiceFile.name,
         size: invoiceFile.size,
         type: invoiceFile.type,
+        lastModified: invoiceFile.lastModified,
       });
-
+      
       if (invoiceFile.size === 0) {
         toast.error("Le fichier facture est vide");
         return;
@@ -185,21 +187,46 @@ export function OngoingOrdersTable() {
         toast.error("Veuillez sélectionner un fichier PDF valide");
         return;
       }
+      
+      // Vérifier que le fichier peut être lu
+      try {
+        const arrayBuffer = await invoiceFile.arrayBuffer();
+        console.log("File can be read, buffer size:", arrayBuffer.byteLength);
+        if (arrayBuffer.byteLength === 0) {
+          toast.error("Le fichier sélectionné est corrompu ou vide");
+          return;
+        }
+      } catch (readError) {
+        console.error("Error reading file:", readError);
+        toast.error("Impossible de lire le fichier sélectionné");
+        return;
+      }
+      
       formData.append("facture", invoiceFile);
     } else {
       console.log("No file selected for upload");
     }
 
+    console.log("Sending request to:", `/api/magasinier/commandes/commandes-en-attente/${orderToDeliver}/status`);
+    
     const response = await fetch(`/api/magasinier/commandes/commandes-en-attente/${orderToDeliver}/status`, {
       method: "PUT",
       body: formData,
     });
 
+    console.log("Response status:", response.status);
+    console.log("Response headers:", Object.fromEntries(response.headers.entries()));
+
     if (!response.ok) {
       const errorData = await response.json();
+      console.error("Server error response:", errorData);
       throw new Error(errorData.error || `Erreur ${response.status}`);
     }
 
+    const result = await response.json();
+    console.log("Success response:", result);
+
+    // Rest of your success handling code...
     const order = returnedOrders.find((o) => o.id === orderToDeliver);
     if (order && order.produits.length > 0) {
       const productIds = order.produits.map((item) => item.produit.id);
@@ -213,8 +240,10 @@ export function OngoingOrdersTable() {
     setReturnedOrders(updatedOrders);
     updateFilteredOrders(orderToDeliver);
     toast.success("Commande marquée comme livrée. Quantités de produits mises à jour !");
+    
   } catch (err) {
     console.error("Erreur lors de la livraison de la commande:", err);
+    console.error("Error stack:", err instanceof Error ? err.stack : 'No stack trace');
     toast.error(err instanceof Error ? err.message : "Impossible de mettre à jour le statut de la commande");
   } finally {
     setProcessingOrder(null);
