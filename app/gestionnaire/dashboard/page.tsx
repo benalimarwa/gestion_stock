@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { Cercle } from "@/components/admin/Cercle";
 import { Histogramme } from "@/components/admin/Histogramme";
 import UserCard from "@/components/admin/UserCard";
-import Wrapper from "@/components/admin/Wrapper";
+import Wrapper from "@/components/gestionnaire/Wrapper";
 import { CommandesParFournisseurChart } from "@/components/admin/CommandesParFournisseurChart";
 import { CommandesDemandesChart } from "@/components/admin/CommandesDemandesChart";
 import { CommandesLivreesMensuel } from "@/components/admin/CommandesLivreesMensuel";
@@ -1286,16 +1286,7 @@ const exportWeeklyReportToPDF = async () => {
     </ExpandableChart>
   </motion.div>
 
-  <motion.div
-    initial={{ opacity: 0, y: 20 }}
-    animate={{ opacity: 1, y: 0 }}
-    transition={{ duration: 0.5, delay: 1.2 }}
-    className="lg:col-span-3"
-  >
-    <ExpandableChart title="">
-      <CommandesLivreesMensuel />
-    </ExpandableChart>
-  </motion.div>
+  
 
   <motion.div
     initial={{ opacity: 0, y: 20 }}

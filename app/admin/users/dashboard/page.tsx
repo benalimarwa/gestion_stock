@@ -1286,16 +1286,7 @@ const exportWeeklyReportToPDF = async () => {
     </ExpandableChart>
   </motion.div>
 
-  <motion.div
-    initial={{ opacity: 0, y: 20 }}
-    animate={{ opacity: 1, y: 0 }}
-    transition={{ duration: 0.5, delay: 1.2 }}
-    className="lg:col-span-3"
-  >
-    <ExpandableChart title="">
-      <CommandesLivreesMensuel />
-    </ExpandableChart>
-  </motion.div>
+  
 
   <motion.div
     initial={{ opacity: 0, y: 20 }}

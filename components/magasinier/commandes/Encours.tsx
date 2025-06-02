@@ -164,48 +164,53 @@ export function OngoingOrdersTable() {
   };
 
   const deliverOrder = async () => {
-    if (!orderToDeliver) return;
-    try {
-      setProcessingOrder(orderToDeliver);
-      const formData = new FormData();
-      formData.append("statut", "LIVREE");
-      if (invoiceFile && invoiceFile.size > 0) {
-        formData.append("facture", invoiceFile);
+  if (!orderToDeliver) return;
+  try {
+    setProcessingOrder(orderToDeliver);
+    const formData = new FormData();
+    formData.append("statut", "LIVREE");
+    
+    if (invoiceFile) {
+      if (invoiceFile.type !== "application/pdf") {
+        toast.error("Veuillez sélectionner un fichier PDF valide");
+        return;
       }
-      const response = await fetch(`/api/magasinier/commandes/commandes-en-attente/${orderToDeliver}/status`, {
-        method: "PUT",
-        body: formData,
-      });
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `Erreur ${response.status}`);
-      }
-
-      // Find the order to get product details for logging
-      const order = returnedOrders.find((o) => o.id === orderToDeliver);
-      if (order && order.produits.length > 0) {
-        const productIds = order.produits.map((item) => item.produit.id);
-        const description = `Commande ${order.id.substring(0, 8)}... livrée. Produits: ${order.produits
-          .map((item) => `${item.produit.nom} (Quantité: ${item.quantite})`)
-          .join(", ")}`;
-        await logRegistryAction(productIds, "COMMANDE_LIVREE", description);
-      }
-
-      const updatedOrders = returnedOrders.filter((order) => order.id !== orderToDeliver);
-      setReturnedOrders(updatedOrders);
-      updateFilteredOrders(orderToDeliver);
-      toast.success("Commande marquée comme livrée. Quantités de produits mises à jour !");
-    } catch (err) {
-      console.error(err);
-      toast.error(err instanceof Error ? err.message : "Impossible de mettre à jour le statut de la commande");
-    } finally {
-      setProcessingOrder(null);
-      setDeliveryModal(false);
-      setOrderToDeliver(null);
-      resetFileInput();
+      formData.append("facture", invoiceFile);
     }
-  };
 
+    const response = await fetch(`/api/magasinier/commandes/commandes-en-attente/${orderToDeliver}/status`, {
+      method: "PUT",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || `Erreur ${response.status}`);
+    }
+
+    const order = returnedOrders.find((o) => o.id === orderToDeliver);
+    if (order && order.produits.length > 0) {
+      const productIds = order.produits.map((item) => item.produit.id);
+      const description = `Commande ${order.id.substring(0, 8)}... livrée. Produits: ${order.produits
+        .map((item) => `${item.produit.nom} (Quantité: ${item.quantite})`)
+        .join(", ")}`;
+      await logRegistryAction(productIds, "COMMANDE_LIVREE", description);
+    }
+
+    const updatedOrders = returnedOrders.filter((order) => order.id !== orderToDeliver);
+    setReturnedOrders(updatedOrders);
+    updateFilteredOrders(orderToDeliver);
+    toast.success("Commande marquée comme livrée. Quantités de produits mises à jour !");
+  } catch (err) {
+    console.error("Erreur lors de la livraison de la commande:", err);
+    toast.error(err instanceof Error ? err.message : "Impossible de mettre à jour le statut de la commande");
+  } finally {
+    setProcessingOrder(null);
+    setDeliveryModal(false);
+    setOrderToDeliver(null);
+    resetFileInput();
+  }
+};
   const updateOrderStatus = async (orderId: string, newStatus: string, raisonRetour?: string) => {
     try {
       setProcessingOrder(orderId);
