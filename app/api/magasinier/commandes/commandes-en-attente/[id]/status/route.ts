@@ -1,150 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/db";
-import { writeFile, mkdir, unlink, access } from "fs/promises";
+import { writeFile, mkdir, unlink, access, stat } from "fs/promises";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { StatutProduit, StatutCommande } from "@prisma/client";
 import { constants } from "fs";
+import { existsSync } from "fs";
 
-async function ensureDirectoryExists(dir: string): Promise<void> {
-  try {
-    // Vérifier si le dossier existe déjà
-    await access(dir, constants.F_OK);
-    console.log(`Directory already exists: ${dir}`);
-  } catch {
-    // Le dossier n'existe pas, le créer
-    try {
-      await mkdir(dir, { recursive: true });
-      console.log(`Directory created: ${dir}`);
-    } catch (error) {
-      console.error(`Failed to create directory ${dir}:`, {
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-      });
-      throw new Error(`Unable to create directory ${dir}: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }
-}
-
-function isValidPdfFile(file: File): { isValid: boolean; error?: string } {
-  // Vérifier la taille
-  if (file.size === 0) {
-    return { isValid: false, error: "Le fichier facture est vide" };
-  }
-
-  const maxSize = 10 * 1024 * 1024; // 10MB
-  if (file.size > maxSize) {
-    return { isValid: false, error: "Le fichier est trop volumineux (max 10MB)" };
-  }
-
-  // Vérifier l'extension
-  const fileName = file.name.toLowerCase();
-  if (!fileName.endsWith('.pdf')) {
-    return { isValid: false, error: "Le fichier doit avoir l'extension .pdf" };
-  }
-
-  // Types MIME valides pour PDF (plus permissif)
-  const validPdfTypes = [
-    "application/pdf",
-    "application/x-pdf",
-    "application/acrobat",
-    "application/vnd.pdf",
-    "text/pdf",
-    "text/x-pdf",
-  ];
-
-  // Accepter si le type MIME est valide OU si le nom se termine par .pdf
-  const hasValidMimeType = validPdfTypes.includes(file.type);
-  const hasValidExtension = fileName.endsWith('.pdf');
-
-  if (!hasValidMimeType && !hasValidExtension) {
-    return { 
-      isValid: false, 
-      error: `Type de fichier non valide. Type reçu: ${file.type}. Veuillez utiliser un fichier PDF.` 
-    };
-  }
-
-  return { isValid: true };
-}
-
-async function saveFileToSystem(file: File, commande: any): Promise<string> {
-  // Définir le répertoire de stockage
-  const facturesDir = path.join(process.cwd(), "public", "factures");
-  
-  console.log("Ensuring directory exists:", facturesDir);
-  await ensureDirectoryExists(facturesDir);
-
-  // Générer un nom de fichier unique
-  const timestamp = Date.now();
-  const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-  const fileName = `facture-${commande.id}-${timestamp}-${uuidv4()}.pdf`;
-  const savedFilePath = path.join(facturesDir, fileName);
-  const publicPath = `/factures/${fileName}`;
-
-  console.log("File paths:", { 
-    facturesDir, 
-    fileName, 
-    savedFilePath, 
-    publicPath,
-    originalName: file.name,
-    sanitizedName: sanitizedFileName
-  });
-
-  try {
-    // Convertir le fichier en buffer
-    console.log("Converting file to buffer...");
-    const arrayBuffer = await file.arrayBuffer();
-    const fileBuffer = Buffer.from(arrayBuffer);
-
-    if (fileBuffer.length === 0) {
-      throw new Error("Buffer vide après conversion du fichier");
-    }
-
-    if (fileBuffer.length !== file.size) {
-      console.warn(`Taille du buffer (${fileBuffer.length}) différente de la taille du fichier (${file.size})`);
-    }
-
-    console.log("Buffer created successfully, size:", fileBuffer.length);
-
-    // Écrire le fichier
-    console.log("Writing file to:", savedFilePath);
-    await writeFile(savedFilePath, fileBuffer);
-    
-    // Vérifier que le fichier a été écrit
-    await access(savedFilePath, constants.F_OK);
-    console.log("File written and verified successfully");
-
-    return publicPath;
-
-  } catch (error) {
-    console.error("Erreur lors de l'enregistrement du fichier:", {
-      message: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-      savedFilePath,
-      fileSize: file.size,
-      fileName: file.name,
-      fileType: file.type,
-    });
-    
-    // Nettoyer le fichier en cas d'erreur
-    try {
-      await unlink(savedFilePath);
-      console.log("Cleaned up failed file:", savedFilePath);
-    } catch (unlinkError) {
-      console.error("Failed to clean up file:", unlinkError);
-    }
-    
-    throw error;
-  }
-}
-// Version de test temporaire - remplacez votre fonction PUT par celle-ci
+// Version de débogage très détaillée
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const { id } = await params;
-    console.log("=== TEST VERSION ===");
+    console.log("=== DÉBOGAGE DÉTAILLÉ ===");
     console.log("Order ID:", id);
     console.log("Process CWD:", process.cwd());
     console.log("Node version:", process.version);
@@ -165,56 +35,182 @@ export async function PUT(
         type: factureFile.type
       });
 
-      // Test simple d'écriture dans le dossier temporaire
+      // Test des permissions système
+      console.log("\n--- Test des permissions ---");
       const os = require('os');
       const tempDir = os.tmpdir();
-      const testPath = path.join(tempDir, `test-${Date.now()}.pdf`);
-      
-      console.log("Testing write to temp:", testPath);
+      console.log("Temp directory:", tempDir);
       
       try {
-        const buffer = Buffer.from(await factureFile.arrayBuffer());
-        await writeFile(testPath, buffer);
+        // Test 1: Vérifier les permissions du dossier temp
+        const tempStat = await stat(tempDir);
+        console.log("Temp dir permissions:", tempStat.mode.toString(8));
+        console.log("Temp dir is directory:", tempStat.isDirectory());
+      } catch (tempError) {
+        console.error("❌ Cannot access temp directory:", tempError);
+      }
+
+      // Test 2: Tester l'écriture dans temp
+      const testTempPath = path.join(tempDir, `test-${Date.now()}.txt`);
+      try {
+        await writeFile(testTempPath, "test content");
         console.log("✅ Temp write successful");
-        
-        // Nettoyage
-        await unlink(testPath);
+        await unlink(testTempPath);
         console.log("✅ Temp file cleaned up");
+      } catch (tempWriteError) {
+        console.error("❌ Temp write failed:", {
+          message: tempWriteError instanceof Error ? tempWriteError.message : String(tempWriteError),
+          code: (tempWriteError as any)?.code,
+          errno: (tempWriteError as any)?.errno,
+          path: (tempWriteError as any)?.path
+        });
+      }
+
+      // Test 3: Vérifier le dossier public
+      console.log("\n--- Test du dossier public ---");
+      const publicDir = path.join(process.cwd(), "public");
+      console.log("Public directory path:", publicDir);
+      console.log("Public directory exists (sync):", existsSync(publicDir));
+
+      try {
+        const publicStat = await stat(publicDir);
+        console.log("Public dir permissions:", publicStat.mode.toString(8));
+        console.log("Public dir is directory:", publicStat.isDirectory());
+      } catch (publicError) {
+        console.error("❌ Cannot access public directory:", {
+          message: publicError instanceof Error ? publicError.message : String(publicError),
+          code: (publicError as any)?.code
+        });
         
-        // Maintenant tester dans public
-        const publicDir = path.join(process.cwd(), "public");
-        const facturesDir = path.join(publicDir, "factures");
-        
-        console.log("Public dir:", publicDir);
-        console.log("Factures dir:", facturesDir);
-        
-        // Créer le dossier
+        // Essayer de créer le dossier public
+        try {
+          await mkdir(publicDir, { recursive: true });
+          console.log("✅ Created public directory");
+        } catch (createError) {
+          console.error("❌ Cannot create public directory:", createError);
+        }
+      }
+
+      // Test 4: Créer le dossier factures
+      console.log("\n--- Test du dossier factures ---");
+      const facturesDir = path.join(publicDir, "factures");
+      console.log("Factures directory path:", facturesDir);
+      console.log("Factures directory exists (sync):", existsSync(facturesDir));
+
+      try {
         await mkdir(facturesDir, { recursive: true });
-        console.log("✅ Directory created/exists");
+        console.log("✅ Factures directory created/exists");
         
-        // Écrire le fichier
-        const finalPath = path.join(facturesDir, `test-${Date.now()}.pdf`);
-        await writeFile(finalPath, buffer);
-        console.log("✅ File written to public/factures");
+        const facturesStat = await stat(facturesDir);
+        console.log("Factures dir permissions:", facturesStat.mode.toString(8));
+        console.log("Factures dir is directory:", facturesStat.isDirectory());
+      } catch (facturesError) {
+        console.error("❌ Cannot create factures directory:", {
+          message: facturesError instanceof Error ? facturesError.message : String(facturesError),
+          code: (facturesError as any)?.code,
+          errno: (facturesError as any)?.errno,
+          path: (facturesError as any)?.path
+        });
         
-        // Pour ce test, on ne supprime pas le fichier pour vérification
+        return NextResponse.json({
+          error: "Impossible de créer le dossier factures",
+          details: facturesError instanceof Error ? facturesError.message : String(facturesError),
+          code: (facturesError as any)?.code
+        }, { status: 500 });
+      }
+
+      // Test 5: Préparer le fichier
+      console.log("\n--- Préparation du fichier ---");
+      let fileBuffer: Buffer;
+      try {
+        const arrayBuffer = await factureFile.arrayBuffer();
+        fileBuffer = Buffer.from(arrayBuffer);
+        
+        console.log("File conversion successful:");
+        console.log("- Original size:", factureFile.size);
+        console.log("- Buffer size:", fileBuffer.length);
+        console.log("- Buffer is valid:", fileBuffer.length > 0);
+        
+        if (fileBuffer.length === 0) {
+          throw new Error("Buffer vide après conversion");
+        }
+        
+        if (fileBuffer.length !== factureFile.size) {
+          console.warn("⚠️ Size mismatch between file and buffer");
+        }
+        
+      } catch (bufferError) {
+        console.error("❌ File buffer conversion failed:", bufferError);
+        return NextResponse.json({
+          error: "Conversion du fichier échouée",
+          details: bufferError instanceof Error ? bufferError.message : String(bufferError)
+        }, { status: 500 });
+      }
+
+      // Test 6: Écriture du fichier final
+      console.log("\n--- Écriture du fichier final ---");
+      const timestamp = Date.now();
+      const fileName = `facture-${id}-${timestamp}-${uuidv4()}.pdf`;
+      const finalPath = path.join(facturesDir, fileName);
+      const publicPath = `/factures/${fileName}`;
+      
+      console.log("Final file paths:", {
+        fileName,
+        finalPath,
+        publicPath
+      });
+
+      try {
+        await writeFile(finalPath, fileBuffer);
+        console.log("✅ File written successfully");
+        
+        // Vérification finale
+        const finalStat = await stat(finalPath);
+        console.log("Final file stats:", {
+          size: finalStat.size,
+          isFile: finalStat.isFile(),
+          permissions: finalStat.mode.toString(8)
+        });
+        
+        if (finalStat.size !== fileBuffer.length) {
+          console.warn("⚠️ Written file size differs from buffer size");
+        }
         
         return NextResponse.json({
           success: true,
-          message: "Test réussi - fichier sauvegardé",
-          testPath: finalPath
+          message: "Fichier sauvegardé avec succès",
+          data: {
+            fileName,
+            publicPath,
+            size: finalStat.size,
+            originalSize: factureFile.size
+          }
         });
         
-      } catch (fileError) {
-        console.error("❌ File operation failed:", fileError);
+      } catch (writeError) {
+        console.error("❌ Final file write failed:", {
+          message: writeError instanceof Error ? writeError.message : String(writeError),
+          code: (writeError as any)?.code,
+          errno: (writeError as any)?.errno,
+          path: (writeError as any)?.path,
+          finalPath,
+          bufferSize: fileBuffer.length
+        });
+        
         return NextResponse.json({
-          error: "Test d'écriture échoué",
-          details: fileError instanceof Error ? fileError.message : String(fileError)
+          error: "Écriture du fichier échouée",
+          details: {
+            message: writeError instanceof Error ? writeError.message : String(writeError),
+            code: (writeError as any)?.code,
+            path: finalPath,
+            bufferSize: fileBuffer.length
+          }
         }, { status: 500 });
       }
     }
 
-    // Si pas de fichier, juste tester la mise à jour du statut
+    // Si pas de fichier, juste mettre à jour le statut
+    console.log("\n--- Mise à jour du statut sans fichier ---");
     const commande = await prisma.commande.findUnique({
       where: { id }
     });
@@ -235,10 +231,18 @@ export async function PUT(
     });
 
   } catch (error) {
-    console.error("❌ Test error:", error);
+    console.error("❌ Global error:", {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      code: (error as any)?.code
+    });
+    
     return NextResponse.json({
-      error: "Erreur de test",
-      details: error instanceof Error ? error.message : String(error)
+      error: "Erreur globale",
+      details: {
+        message: error instanceof Error ? error.message : String(error),
+        code: (error as any)?.code
+      }
     }, { status: 500 });
   }
 }
