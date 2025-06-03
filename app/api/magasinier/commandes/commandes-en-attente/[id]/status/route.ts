@@ -92,111 +92,174 @@ export async function PUT(
     // Handle facture file upload
     const factureFile = formData.get("facture") as File | null;
 
-    if (factureFile && statut === StatutCommande.LIVREE) {
-      console.log("Processing facture file:", {
-        name: factureFile.name,
-        size: factureFile.size,
-        type: factureFile.type,
-      });
+    // Remplacez la section de gestion des fichiers par cette version améliorée
 
-      // Validate file
-      if (factureFile.size === 0) {
-        return NextResponse.json(
-          { error: "Le fichier facture est vide" },
-          { status: 400 }
-        );
-      }
+if (factureFile && statut === StatutCommande.LIVREE) {
+  console.log("Processing facture file:", {
+    name: factureFile.name,
+    size: factureFile.size,
+    type: factureFile.type,
+  });
 
-      // Validation plus flexible pour les types de fichiers PDF
-      const validPdfTypes = [
-        "application/pdf",
-        "application/x-pdf",
-        "application/acrobat",
-        "applications/vnd.pdf",
-        "text/pdf",
-        "text/x-pdf"
-      ];
+  // Validate file
+  if (factureFile.size === 0) {
+    return NextResponse.json(
+      { error: "Le fichier facture est vide" },
+      { status: 400 }
+    );
+  }
 
-      if (!validPdfTypes.includes(factureFile.type) && !factureFile.name.toLowerCase().endsWith('.pdf')) {
-        return NextResponse.json(
-          { error: `Le fichier doit être un PDF. Type reçu: ${factureFile.type}` },
-          { status: 400 }
-        );
-      }
+  // Validation plus flexible pour les types de fichiers PDF
+  const validPdfTypes = [
+    "application/pdf",
+    "application/x-pdf",
+    "application/acrobat",
+    "applications/vnd.pdf",
+    "text/pdf",
+    "text/x-pdf"
+  ];
 
-      // Limite de taille (10MB)
-      const maxSize = 10 * 1024 * 1024; // 10MB
-      if (factureFile.size > maxSize) {
-        return NextResponse.json(
-          { error: "Le fichier est trop volumineux (max 10MB)" },
-          { status: 400 }
-        );
-      }
+  if (!validPdfTypes.includes(factureFile.type) && !factureFile.name.toLowerCase().endsWith('.pdf')) {
+    return NextResponse.json(
+      { error: `Le fichier doit être un PDF. Type reçu: ${factureFile.type}` },
+      { status: 400 }
+    );
+  }
 
-      try {
-        // Define storage directory - utiliser un chemin absolu
-        const publicDir = path.join(process.cwd(), "public");
-        const storageDir = path.join(publicDir, "factures");
-        
-        console.log("Storage directories:", {
-          publicDir,
-          storageDir,
-          cwd: process.cwd()
-        });
+  // Limite de taille (10MB)
+  const maxSize = 10 * 1024 * 1024; // 10MB
+  if (factureFile.size > maxSize) {
+    return NextResponse.json(
+      { error: "Le fichier est trop volumineux (max 10MB)" },
+      { status: 400 }
+    );
+  }
 
-        // Ensure directories exist
-        await ensureDirectoryExists(publicDir);
-        await ensureDirectoryExists(storageDir);
+  try {
+    // Define storage directory avec vérifications supplémentaires
+    const publicDir = path.join(process.cwd(), "public");
+    const storageDir = path.join(publicDir, "factures");
+    
+    console.log("Storage directories:", {
+      publicDir,
+      storageDir,
+      cwd: process.cwd(),
+      publicExists: await access(publicDir).then(() => true).catch(() => false),
+      storageExists: await access(storageDir).then(() => true).catch(() => false)
+    });
 
-        // Generate unique filename avec timestamp pour éviter les collisions
-        const timestamp = Date.now();
-        const fileName = `facture-${commande.id}-${timestamp}-${uuidv4()}.pdf`;
-        const facturePath = `/factures/${fileName}`; // Chemin public pour la base de données
-        const fullFilePath = path.join(storageDir, fileName); // Chemin complet pour l'écriture
-
-        console.log("File paths:", {
-          fileName,
-          facturePath,
-          fullFilePath
-        });
-
-        // Convert file to buffer
-        const arrayBuffer = await factureFile.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        
-        console.log("Buffer created, size:", buffer.length);
-
-        // Save file
-        await writeFile(fullFilePath, buffer);
-        console.log("Facture file saved successfully to:", fullFilePath);
-
-        // Verify file was written
-        try {
-          await access(fullFilePath);
-          console.log("File verification successful");
-        } catch (verifyError) {
-          console.error("File verification failed:", verifyError);
-          throw new Error("Fichier sauvegardé mais non accessible");
-        }
-
-        updateData.facture = facturePath;
-
-      } catch (fileError) {
-        console.error("Erreur détaillée lors de l'enregistrement du fichier:", {
-          error: fileError,
-          message: fileError instanceof Error ? fileError.message : String(fileError),
-          stack: fileError instanceof Error ? fileError.stack : undefined
-        });
-        
-        return NextResponse.json(
-          {
-            error: "Erreur lors de l'enregistrement de la facture",
-            details: fileError instanceof Error ? fileError.message : String(fileError),
-          },
-          { status: 500 }
-        );
-      }
+    // Ensure directories exist with detailed logging
+    try {
+      await ensureDirectoryExists(publicDir);
+      console.log("✓ Public directory verified");
+    } catch (error) {
+      console.error("✗ Failed to create/access public directory:", error);
+      throw new Error(`Cannot access public directory: ${error instanceof Error ? error.message : String(error)}`);
     }
+
+    try {
+      await ensureDirectoryExists(storageDir);
+      console.log("✓ Storage directory verified");
+    } catch (error) {
+      console.error("✗ Failed to create/access storage directory:", error);
+      throw new Error(`Cannot access storage directory: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    // Generate unique filename avec timestamp pour éviter les collisions
+    const timestamp = Date.now();
+    const fileName = `facture-${commande.id}-${timestamp}-${uuidv4()}.pdf`;
+    const facturePath = `/factures/${fileName}`; // Chemin public pour la base de données
+    const fullFilePath = path.join(storageDir, fileName); // Chemin complet pour l'écriture
+
+    console.log("File paths:", {
+      fileName,
+      facturePath,
+      fullFilePath,
+      storageDir
+    });
+
+    // Convert file to buffer avec vérifications
+    let buffer: Buffer;
+    try {
+      const arrayBuffer = await factureFile.arrayBuffer();
+      buffer = Buffer.from(arrayBuffer);
+      console.log("✓ Buffer created successfully, size:", buffer.length);
+    } catch (error) {
+      console.error("✗ Failed to create buffer:", error);
+      throw new Error(`Erreur lors de la conversion du fichier: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    // Vérifier que le buffer n'est pas vide
+    if (buffer.length === 0) {
+      throw new Error("Le buffer du fichier est vide après conversion");
+    }
+
+    // Save file avec gestion d'erreur détaillée
+    try {
+      await writeFile(fullFilePath, buffer);
+      console.log("✓ File written successfully to:", fullFilePath);
+    } catch (writeError) {
+      console.error("✗ Write file error:", writeError);
+      // Vérifier l'espace disque et les permissions
+      throw new Error(`Impossible d'écrire le fichier: ${writeError instanceof Error ? writeError.message : String(writeError)}`);
+    }
+
+    // Verify file was written
+    try {
+      await access(fullFilePath);
+      console.log("✓ File verification successful");
+      
+      // Vérifier aussi la taille du fichier écrit
+      const fs = await import('fs/promises');
+      const stats = await fs.stat(fullFilePath);
+      console.log("File stats:", {
+        size: stats.size,
+        originalSize: buffer.length,
+        match: stats.size === buffer.length
+      });
+      
+      if (stats.size !== buffer.length) {
+        throw new Error(`Taille du fichier incorrecte: écrit ${stats.size}, attendu ${buffer.length}`);
+      }
+      
+    } catch (verifyError) {
+      console.error("✗ File verification failed:", verifyError);
+      throw new Error(`Fichier sauvegardé mais non accessible: ${verifyError instanceof Error ? verifyError.message : String(verifyError)}`);
+    }
+
+    updateData.facture = facturePath;
+    console.log("✓ File upload completed successfully");
+
+  } catch (fileError) {
+    console.error("Erreur détaillée lors de l'enregistrement du fichier:", {
+      error: fileError,
+      message: fileError instanceof Error ? fileError.message : String(fileError),
+      stack: fileError instanceof Error ? fileError.stack : undefined,
+      name: fileError instanceof Error ? fileError.name : 'Unknown',
+      code: (fileError as any)?.code,
+      errno: (fileError as any)?.errno,
+      syscall: (fileError as any)?.syscall,
+      path: (fileError as any)?.path
+    });
+    
+    return NextResponse.json(
+      {
+        error: "Erreur lors de l'enregistrement de la facture",
+        details: fileError instanceof Error ? fileError.message : String(fileError),
+        debug: {
+          phase: "file_upload",
+          timestamp: new Date().toISOString(),
+          fileInfo: {
+            name: factureFile.name,
+            size: factureFile.size,
+            type: factureFile.type
+          }
+        }
+      },
+      { status: 500 }
+    );
+  }
+}
 
     // Handle delivery (LIVREE)
     if (statut === StatutCommande.LIVREE) {
