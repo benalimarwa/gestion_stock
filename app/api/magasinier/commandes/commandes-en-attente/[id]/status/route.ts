@@ -1,368 +1,254 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/db";
-import { writeFile, mkdir } from "fs/promises";
+import { writeFile, mkdir, unlink } from "fs/promises";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
-import { StatutCommande } from "@prisma/client";
+import { StatutProduit, StatutCommande } from "@prisma/client";
 
-// === SOLUTION 1: Stockage en base de données (Recommandé) ===
-export async function PUT_DATABASE_STORAGE(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+async function ensureDirectoryExists(dir: string): Promise<void> {
   try {
-    const { id } = await params;
-    const formData = await request.formData();
-    const statutInput = formData.get("statut") as string;
-    const factureFile = formData.get("facture") as File | null;
-
-    console.log("Processing order:", id);
-    console.log("Status:", statutInput);
-    console.log("Has file:", !!factureFile);
-
-    let factureData = null;
-
-    if (factureFile) {
-      // Validation du fichier
-      const validation = isValidPdfFile(factureFile);
-      if (!validation.isValid) {
-        return NextResponse.json(
-          { error: validation.error },
-          { status: 400 }
-        );
-      }
-
-      // Convertir le fichier en base64 pour stockage en DB
-      const arrayBuffer = await factureFile.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      const base64Data = buffer.toString('base64');
-
-      factureData = {
-        fileName: factureFile.name,
-        fileType: factureFile.type,
-        fileSize: factureFile.size,
-        fileData: base64Data, // Stockage en base64
-        uploadDate: new Date()
-      };
-
-      console.log("File converted to base64, size:", base64Data.length);
-    }
-
-    // Mettre à jour la commande
-    const updatedOrder = await prisma.commande.update({
-      where: { id },
-      data: {
-        statut: statutInput as StatutCommande,
-        ...(factureData && {
-          facture: factureData.fileName,
-          factureData: JSON.stringify(factureData) // Stocker toutes les données
-        })
-      }
-    });
-
-    return NextResponse.json({
-      success: true,
-      data: updatedOrder,
-      message: factureFile ? "Commande et facture mises à jour" : "Statut mis à jour"
-    });
-
+    await mkdir(dir, { recursive: true });
+    console.log(`Directory ensured: ${dir}`);
   } catch (error) {
-    console.error("Database storage error:", error);
-    return NextResponse.json({
-      error: "Erreur lors de la mise à jour",
-      details: error instanceof Error ? error.message : String(error)
-    }, { status: 500 });
+    console.error(`Failed to create directory ${dir}:`, {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    throw new Error(`Unable to create directory ${dir}: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }
 
-// === SOLUTION 2: Stockage dans le dossier tmp (Temporaire) ===
-export async function PUT_TMP_STORAGE(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
-    const formData = await request.formData();
-    const statutInput = formData.get("statut") as string;
-    const factureFile = formData.get("facture") as File | null;
-
-    let facturePath = null;
-
-    if (factureFile) {
-      const validation = isValidPdfFile(factureFile);
-      if (!validation.isValid) {
-        return NextResponse.json(
-          { error: validation.error },
-          { status: 400 }
-        );
-      }
-
-      // Utiliser le dossier temporaire du système
-      const os = require('os');
-      const tmpDir = path.join(os.tmpdir(), 'factures');
-      
-      try {
-        await mkdir(tmpDir, { recursive: true });
-        console.log("Temp directory created:", tmpDir);
-      } catch (mkdirError) {
-        console.error("Cannot create temp directory:", mkdirError);
-        throw new Error("Impossible de créer le dossier temporaire");
-      }
-
-      // Sauvegarder le fichier
-      const fileName = `facture-${id}-${Date.now()}-${uuidv4()}.pdf`;
-      const tempFilePath = path.join(tmpDir, fileName);
-      
-      const arrayBuffer = await factureFile.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      
-      await writeFile(tempFilePath, buffer);
-      facturePath = tempFilePath;
-      
-      console.log("File saved to temp:", tempFilePath);
-    }
-
-    // Mettre à jour la commande
-    const updatedOrder = await prisma.commande.update({
-      where: { id },
-      data: {
-        statut: statutInput as StatutCommande,
-        ...(facturePath && { facture: facturePath })
-      }
-    });
-
-    return NextResponse.json({
-      success: true,
-      data: updatedOrder,
-      message: factureFile ? "Commande et facture mises à jour" : "Statut mis à jour"
-    });
-
-  } catch (error) {
-    console.error("Temp storage error:", error);
-    return NextResponse.json({
-      error: "Erreur lors de la mise à jour",
-      details: error instanceof Error ? error.message : String(error)
-    }, { status: 500 });
-  }
-}
-
-// === SOLUTION 3: Créer manuellement le dossier public ===
-export async function PUT_MANUAL_DIRECTORY(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const { id } = await params;
-    const formData = await request.formData();
-    const statutInput = formData.get("statut") as string;
-    const factureFile = formData.get("facture") as File | null;
-
-    let facturePath = null;
-
-    if (factureFile) {
-      const validation = isValidPdfFile(factureFile);
-      if (!validation.isValid) {
-        return NextResponse.json(
-          { error: validation.error },
-          { status: 400 }
-        );
-      }
-
-      // Créer le chemin complet étape par étape
-      const rootDir = process.cwd();
-      const publicDir = path.join(rootDir, "public");
-      const facturesDir = path.join(publicDir, "factures");
-      
-      console.log("Creating directories step by step:");
-      console.log("Root:", rootDir);
-      console.log("Public:", publicDir);
-      console.log("Factures:", facturesDir);
-
-      try {
-        // Créer public d'abord
-        await mkdir(publicDir, { recursive: true });
-        console.log("✅ Public directory OK");
-        
-        // Puis factures
-        await mkdir(facturesDir, { recursive: true });
-        console.log("✅ Factures directory OK");
-        
-      } catch (mkdirError) {
-        console.error("Directory creation failed:", mkdirError);
-        
-        // Fallback: utiliser un dossier uploads à la racine
-        const uploadsDir = path.join(rootDir, "uploads");
-        console.log("Trying fallback directory:", uploadsDir);
-        
-        try {
-          await mkdir(uploadsDir, { recursive: true });
-          console.log("✅ Uploads directory created");
-          
-          const fileName = `facture-${id}-${Date.now()}-${uuidv4()}.pdf`;
-          const filePath = path.join(uploadsDir, fileName);
-          
-          const arrayBuffer = await factureFile.arrayBuffer();
-          const buffer = Buffer.from(arrayBuffer);
-          
-          await writeFile(filePath, buffer);
-          facturePath = `/uploads/${fileName}`;
-          
-        } catch (fallbackError) {
-          console.error("Fallback also failed:", fallbackError);
-          throw new Error("Impossible de créer un dossier de stockage");
-        }
-      }
-
-      // Si les dossiers ont été créés avec succès
-      if (!facturePath) {
-        const fileName = `facture-${id}-${Date.now()}-${uuidv4()}.pdf`;
-        const filePath = path.join(facturesDir, fileName);
-        
-        const arrayBuffer = await factureFile.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        
-        await writeFile(filePath, buffer);
-        facturePath = `/factures/${fileName}`;
-      }
-    }
-
-    // Mettre à jour la commande
-    const updatedOrder = await prisma.commande.update({
-      where: { id },
-      data: {
-        statut: statutInput as StatutCommande,
-        ...(facturePath && { facture: facturePath })
-      }
-    });
-
-    return NextResponse.json({
-      success: true,
-      data: updatedOrder,
-      message: factureFile ? "Commande et facture mises à jour" : "Statut mis à jour"
-    });
-
-  } catch (error) {
-    console.error("Manual directory error:", error);
-    return NextResponse.json({
-      error: "Erreur lors de la mise à jour",
-      details: error instanceof Error ? error.message : String(error)
-    }, { status: 500 });
-  }
-}
-
-// === SOLUTION 4: Version hybride (Recommandée pour production) ===
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  let savedFilePath: string | undefined;
   try {
     const { id } = await params;
+
+    // Parse FormData
     const formData = await request.formData();
     const statutInput = formData.get("statut") as string;
+    const raisonRetour = formData.get("raisonRetour") as string | null;
     const factureFile = formData.get("facture") as File | null;
 
-    console.log("Processing order:", id);
-    console.log("Status:", statutInput);
-    console.log("Has file:", !!factureFile);
+    console.log("Form data received:", {
+      statut: statutInput,
+      raisonRetour,
+      hasFacture: !!factureFile,
+      factureName: factureFile?.name,
+      factureSize: factureFile?.size,
+      factureType: factureFile?.type,
+    });
 
-    let factureData = null;
+    // Validate statut
+    const validStatuts: StatutCommande[] = [
+      StatutCommande.LIVREE,
+      StatutCommande.EN_RETOUR,
+      StatutCommande.ANNULEE,
+    ];
+    if (!statutInput || !Object.values(StatutCommande).includes(statutInput as StatutCommande)) {
+      return NextResponse.json(
+        { error: "Statut de commande non valide" },
+        { status: 400 }
+      );
+    }
+    const statut = statutInput as StatutCommande;
+    if (!validStatuts.includes(statut)) {
+      return NextResponse.json(
+        { error: "Statut de commande non autorisé pour cette mise à jour" },
+        { status: 400 }
+      );
+    }
 
-    if (factureFile) {
-      // Validation du fichier
-      const validation = isValidPdfFile(factureFile);
-      if (!validation.isValid) {
+    // Fetch the command
+    const commande = await prisma.commande.findUnique({
+      where: { id },
+      include: {
+        produits: {
+          include: {
+            produit: true,
+          },
+        },
+      },
+    });
+
+    if (!commande) {
+      return NextResponse.json(
+        { error: "Commande non trouvée" },
+        { status: 404 }
+      );
+    }
+
+    // Prepare update data
+    const updateData: {
+      statut: StatutCommande;
+      facture?: string;
+      dateLivraison?: Date;
+      raisonRetour?: string | null;
+    } = { statut };
+
+    // Handle facture file upload
+    if (factureFile && statut === StatutCommande.LIVREE) {
+      if (factureFile.size === 0) {
         return NextResponse.json(
-          { error: validation.error },
+          { error: "Le fichier facture est vide" },
+          { status: 400 }
+        );
+      }
+      const validPdfTypes = [
+        "application/pdf",
+        "application/x-pdf",
+        "application/acrobat",
+        "applications/vnd.pdf",
+        "text/pdf",
+        "text/x-pdf",
+      ];
+      if (!validPdfTypes.includes(factureFile.type) && !factureFile.name.toLowerCase().endsWith(".pdf")) {
+        return NextResponse.json(
+          { error: `Le fichier doit être un PDF. Type reçu: ${factureFile.type}` },
+          { status: 400 }
+        );
+      }
+      const maxSize = 10 * 1024 * 1024; // 10MB
+      if (factureFile.size > maxSize) {
+        return NextResponse.json(
+          { error: "Le fichier est trop volumineux (max 10MB)" },
           { status: 400 }
         );
       }
 
-      // Convertir le fichier
-      const arrayBuffer = await factureFile.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      
-      // Essayer d'abord le stockage fichier, sinon base de données
-      let facturePath = null;
-      let useDatabase = false;
-
+      const facturesDir = path.join(process.cwd(), "public", "factures");
       try {
-        // Tentative de stockage fichier
-        const facturesDir = path.join(process.cwd(), "public", "factures");
-        await mkdir(facturesDir, { recursive: true });
-        
-        const fileName = `facture-${id}-${Date.now()}-${uuidv4()}.pdf`;
-        const filePath = path.join(facturesDir, fileName);
-        
-        await writeFile(filePath, buffer);
-        facturePath = `/factures/${fileName}`;
-        console.log("✅ File saved to filesystem:", facturePath);
-        
+        console.log("Ensuring directory exists:", facturesDir);
+        await ensureDirectoryExists(facturesDir);
+
+        const timestamp = Date.now();
+        const fileName = `facture-${commande.id}-${timestamp}-${uuidv4()}.pdf`;
+        savedFilePath = path.join(facturesDir, fileName);
+        const facturePath = `/factures/${fileName}`;
+
+        console.log("File paths:", { facturesDir, fileName, savedFilePath, facturePath });
+
+        console.log("Converting file to buffer...");
+        const arrayBuffer = await factureFile.arrayBuffer();
+        const fileBuffer = Buffer.from(arrayBuffer);
+        if (fileBuffer.length === 0) {
+          throw new Error("Buffer vide après conversion");
+        }
+        console.log("Buffer created, size:", fileBuffer.length);
+
+        console.log("Writing file to:", savedFilePath);
+        await writeFile(savedFilePath, fileBuffer);
+        console.log("File written successfully");
+
+        updateData.facture = facturePath;
       } catch (fileError) {
-        console.log("❌ Filesystem storage failed, using database:", fileError);
-        useDatabase = true;
-        
-        // Stockage en base de données
-        const base64Data = buffer.toString('base64');
-        factureData = {
-          fileName: factureFile.name,
-          fileType: factureFile.type,
-          fileSize: factureFile.size,
-          fileData: base64Data,
-          uploadDate: new Date()
-        };
-        
-        facturePath = `data:${factureFile.type};base64,${base64Data}`;
+        console.error("Erreur détaillée lors du traitement du fichier:", {
+          message: fileError instanceof Error ? fileError.message : String(fileError),
+          stack: fileError instanceof Error ? fileError.stack : undefined,
+          facturesDir,
+          savedFilePath,
+          factureName: factureFile.name,
+          factureSize: factureFile.size,
+          factureType: factureFile.type,
+        });
+        return NextResponse.json(
+          {
+            error: "Erreur lors de l'enregistrement de la facture",
+            details: fileError instanceof Error ? fileError.message : String(fileError),
+          },
+          { status: 500 }
+        );
       }
     }
 
-    // Mettre à jour la commande
-    const updateData: any = {
-      statut: statutInput as StatutCommande
-    };
+    // Update in transaction
+    const updatedOrder = await prisma.$transaction(async (tx) => {
+      if (statut === StatutCommande.LIVREE) {
+        updateData.dateLivraison = new Date();
 
-    if (factureFile) {
-      updateData.facture = factureFile.name;
-      if (factureData) {
-        updateData.factureData = JSON.stringify(factureData);
+        for (const item of commande.produits) {
+          const produit = await tx.produit.findUnique({
+            where: { id: item.produitId },
+          });
+
+          if (produit) {
+            const nouvelleQuantite = produit.quantite + item.quantite;
+            let nouveauStatut: StatutProduit;
+            if (nouvelleQuantite === 0) {
+              nouveauStatut = StatutProduit.RUPTURE;
+            } else if (nouvelleQuantite <= produit.quantiteMinimale) {
+              nouveauStatut = StatutProduit.CRITIQUE;
+            } else {
+              nouveauStatut = StatutProduit.NORMALE;
+            }
+
+            await tx.produit.update({
+              where: { id: item.produitId },
+              data: {
+                quantite: nouvelleQuantite,
+                statut: nouveauStatut,
+              },
+            });
+
+            console.log(`Produit ${item.produitId} mis à jour: ${produit.quantite} + ${item.quantite} = ${nouvelleQuantite}, statut: ${nouveauStatut}`);
+          }
+        }
       }
-    }
 
-    const updatedOrder = await prisma.commande.update({
-      where: { id },
-      data: updateData
+      if (statut === StatutCommande.EN_RETOUR) {
+        if (raisonRetour) {
+          console.log("Raison du retour:", raisonRetour);
+          // Note: raisonRetour is not in schema; logged for now
+          // If schema is updated to include raisonRetour, uncomment:
+          // updateData.raisonRetour = raisonRetour;
+        } else {
+          throw new Error("La raison du retour est requise");
+        }
+      }
+
+      return tx.commande.update({
+        where: { id },
+        data: updateData,
+        include: {
+          fournisseur: true,
+          produits: {
+            include: {
+              produit: true,
+            },
+          },
+        },
+      });
     });
+
+    console.log("Commande mise à jour avec succès:", updatedOrder.id);
 
     return NextResponse.json({
       success: true,
       data: updatedOrder,
-      message: factureFile ? "Commande et facture mises à jour" : "Statut mis à jour",
-      storageMethod: factureFile ? (factureData ? "database" : "filesystem") : "none"
+      message: "Commande mise à jour avec succès",
     });
 
   } catch (error) {
-    console.error("Hybrid storage error:", error);
-    return NextResponse.json({
-      error: "Erreur lors de la mise à jour",
-      details: error instanceof Error ? error.message : String(error)
-    }, { status: 500 });
+    console.error("Erreur générale lors de la mise à jour:", {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    if (savedFilePath) {
+      try {
+        await unlink(savedFilePath);
+        console.log("Cleaned up file:", savedFilePath);
+      } catch (unlinkError) {
+        console.error("Failed to clean up file:", unlinkError);
+      }
+    }
+    return NextResponse.json(
+      {
+        error: "Erreur lors de la mise à jour du statut de commande",
+        details: error instanceof Error ? error.message : "Erreur inconnue",
+      },
+      { status: 500 }
+    );
   }
-}
-
-// Fonction de validation (commune à toutes les solutions)
-function isValidPdfFile(file: File): { isValid: boolean; error?: string } {
-  if (file.size === 0) {
-    return { isValid: false, error: "Le fichier facture est vide" };
-  }
-
-  const maxSize = 10 * 1024 * 1024; // 10MB
-  if (file.size > maxSize) {
-    return { isValid: false, error: "Le fichier est trop volumineux (max 10MB)" };
-  }
-
-  const fileName = file.name.toLowerCase();
-  if (!fileName.endsWith('.pdf')) {
-    return { isValid: false, error: "Le fichier doit avoir l'extension .pdf" };
-  }
-
-  return { isValid: true };
 }
