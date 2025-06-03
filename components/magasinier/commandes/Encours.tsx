@@ -163,15 +163,80 @@ export function OngoingOrdersTable() {
     }
   };
 // Version recommandée avec FormData (plus simple pour les uploads de fichiers)
+// Fonction utilitaire pour valider les fichiers PDF
+const validatePdfFile = (file: File): { isValid: boolean; error?: string } => {
+  // Vérifier la taille
+  if (file.size === 0) {
+    return { isValid: false, error: "Le fichier facture est vide" };
+  }
+
+  const maxSize = 10 * 1024 * 1024; // 10MB
+  if (file.size > maxSize) {
+    return { isValid: false, error: "Le fichier est trop volumineux (max 10MB)" };
+  }
+
+  // Vérifier l'extension
+  const fileName = file.name.toLowerCase();
+  if (!fileName.endsWith('.pdf')) {
+    return { isValid: false, error: "Le fichier doit avoir l'extension .pdf" };
+  }
+
+  // Types MIME valides pour PDF (plus permissif)
+  const validPdfTypes = [
+    "application/pdf",
+    "application/x-pdf",
+    "application/acrobat",
+    "application/vnd.pdf",
+    "text/pdf",
+    "text/x-pdf",
+  ];
+
+  // Accepter si le type MIME est valide OU si le nom se termine par .pdf
+  const hasValidMimeType = validPdfTypes.includes(file.type);
+  const hasValidExtension = fileName.endsWith('.pdf');
+
+  if (!hasValidMimeType && !hasValidExtension) {
+    return { 
+      isValid: false, 
+      error: `Type de fichier non valide (${file.type}). Veuillez utiliser un fichier PDF.` 
+    };
+  }
+
+  return { isValid: true };
+};
+
+// Fonction utilitaire pour tester la lecture du fichier
+const testFileReadability = async (file: File): Promise<{ canRead: boolean; error?: string }> => {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    console.log("File can be read, buffer size:", arrayBuffer.byteLength);
+    
+    if (arrayBuffer.byteLength === 0) {
+      return { canRead: false, error: "Le fichier sélectionné est corrompu ou vide" };
+    }
+    
+    if (arrayBuffer.byteLength !== file.size) {
+      console.warn(`Taille du buffer (${arrayBuffer.byteLength}) différente de la taille du fichier (${file.size})`);
+    }
+    
+    return { canRead: true };
+  } catch (readError) {
+    console.error("Error reading file:", readError);
+    return { canRead: false, error: "Impossible de lire le fichier sélectionné" };
+  }
+};
+
+// Fonction principale pour livrer une commande
 const deliverOrder = async () => {
-  if (!orderToDeliver) return;
+  if (!orderToDeliver) {
+    console.error("Aucune commande à livrer");
+    return;
+  }
   
   try {
     setProcessingOrder(orderToDeliver);
     
-    const formData = new FormData();
-    formData.append("statut", "LIVREE");
-    
+    // Validation du fichier facture si présent
     if (invoiceFile) {
       console.log("Frontend file details:", {
         name: invoiceFile.name,
@@ -180,34 +245,41 @@ const deliverOrder = async () => {
         lastModified: invoiceFile.lastModified,
       });
       
-      if (invoiceFile.size === 0) {
-        toast.error("Le fichier facture est vide");
-        return;
-      }
-      if (invoiceFile.type !== "application/pdf") {
-        toast.error("Veuillez sélectionner un fichier PDF valide");
-        return;
-      }
-      
-      // Vérifier que le fichier peut être lu
-      try {
-        const arrayBuffer = await invoiceFile.arrayBuffer();
-        console.log("File can be read, buffer size:", arrayBuffer.byteLength);
-        if (arrayBuffer.byteLength === 0) {
-          toast.error("Le fichier sélectionné est corrompu ou vide");
-          return;
-        }
-      } catch (readError) {
-        console.error("Error reading file:", readError);
-        toast.error("Impossible de lire le fichier sélectionné");
+      // Validation du fichier
+      const validation = validatePdfFile(invoiceFile);
+      if (!validation.isValid) {
+        toast.error(validation.error);
         return;
       }
       
+      // Test de lecture du fichier
+      const readabilityTest = await testFileReadability(invoiceFile);
+      if (!readabilityTest.canRead) {
+        toast.error(readabilityTest.error);
+        return;
+      }
+    }
+    
+    // Préparer FormData
+    const formData = new FormData();
+    formData.append("statut", "LIVREE");
+    
+    if (invoiceFile) {
       formData.append("facture", invoiceFile);
     }
 
     console.log("Sending request to:", `/api/magasinier/commandes/commandes-en-attente/${orderToDeliver}/status`);
+    console.log("FormData contents:", {
+      statut: formData.get("statut"),
+      hasFacture: !!formData.get("facture"),
+      factureFile: invoiceFile ? {
+        name: invoiceFile.name,
+        size: invoiceFile.size,
+        type: invoiceFile.type
+      } : null
+    });
     
+    // Envoyer la requête
     const response = await fetch(`/api/magasinier/commandes/commandes-en-attente/${orderToDeliver}/status`, {
       method: "PUT",
       body: formData,
@@ -217,44 +289,110 @@ const deliverOrder = async () => {
     console.log("Response status:", response.status);
     console.log("Response headers:", Object.fromEntries(response.headers.entries()));
 
+    // Gestion des erreurs de réponse
     if (!response.ok) {
-      let errorMessage;
+      let errorMessage = `Erreur ${response.status}`;
+      
       try {
         const errorData = await response.json();
         console.error("Server error response:", errorData);
-        errorMessage = errorData.error || errorData.message || `Erreur ${response.status}`;
+        
+        if (errorData.error) {
+          errorMessage = errorData.error;
+        } else if (errorData.message) {
+          errorMessage = errorData.message;
+        } else if (errorData.details) {
+          errorMessage = `${errorData.error || 'Erreur serveur'}: ${errorData.details}`;
+        }
+        
       } catch (jsonError) {
-        // Si la réponse n'est pas du JSON valide
-        const textResponse = await response.text();
-        console.error("Non-JSON error response:", textResponse);
-        errorMessage = `Erreur serveur: ${response.status} - ${textResponse || 'Réponse vide'}`;
+        console.error("Failed to parse error response as JSON:", jsonError);
+        
+        try {
+          const textResponse = await response.text();
+          console.error("Non-JSON error response:", textResponse);
+          
+          if (textResponse.trim()) {
+            errorMessage = `Erreur serveur: ${textResponse.substring(0, 200)}`;
+          } else {
+            errorMessage = `Erreur serveur ${response.status}: Réponse vide`;
+          }
+        } catch (textError) {
+          console.error("Failed to read error response as text:", textError);
+          errorMessage = `Erreur serveur ${response.status}: Impossible de lire la réponse`;
+        }
       }
+      
       throw new Error(errorMessage);
     }
 
-    const result = await response.json();
-    console.log("Success response:", result);
-
-    // Gestion du succès
-    const order = returnedOrders.find((o) => o.id === orderToDeliver);
-    if (order && order.produits.length > 0) {
-      const productIds = order.produits.map((item) => item.produit.id);
-      const description = `Commande ${order.id.substring(0, 8)}... livrée. Produits: ${order.produits
-        .map((item) => `${item.produit.nom} (Quantité: ${item.quantite})`)
-        .join(", ")}`;
-      await logRegistryAction(productIds, "COMMANDE_LIVREE", description);
+    // Traitement de la réponse de succès
+    let result;
+    try {
+      result = await response.json();
+      console.log("Success response:", result);
+    } catch (jsonError) {
+      console.error("Failed to parse success response as JSON:", jsonError);
+      throw new Error("Réponse serveur invalide");
     }
 
+    // Validation de la réponse de succès
+    if (!result.success) {
+      throw new Error(result.message || "La mise à jour a échoué");
+    }
+
+    // Gestion du succès - Logging de l'action
+    try {
+      const order = returnedOrders.find((o) => o.id === orderToDeliver);
+      if (order && order.produits.length > 0) {
+        const productIds = order.produits.map((item) => item.produit.id);
+        const description = `Commande ${order.id.substring(0, 8)}... livrée. Produits: ${order.produits
+          .map((item) => `${item.produit.nom} (Quantité: ${item.quantite})`)
+          .join(", ")}`;
+        
+        await logRegistryAction(productIds, "COMMANDE_LIVREE", description);
+      }
+    } catch (logError) {
+      console.error("Erreur lors du logging:", logError);
+      // Ne pas faire échouer la livraison à cause du logging
+    }
+
+    // Mise à jour de l'état local
     const updatedOrders = returnedOrders.filter((order) => order.id !== orderToDeliver);
     setReturnedOrders(updatedOrders);
     updateFilteredOrders(orderToDeliver);
-    toast.success("Commande marquée comme livrée. Quantités de produits mises à jour !");
+    
+    // Message de succès
+    const successMessage = invoiceFile 
+      ? "Commande marquée comme livrée avec facture. Quantités de produits mises à jour !"
+      : "Commande marquée comme livrée. Quantités de produits mises à jour !";
+    
+    toast.success(successMessage);
     
   } catch (err) {
     console.error("Erreur lors de la livraison de la commande:", err);
-    console.error("Error stack:", err instanceof Error ? err.stack : 'No stack trace');
-    toast.error(err instanceof Error ? err.message : "Impossible de mettre à jour le statut de la commande");
+    console.error("Error details:", {
+      message: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : 'No stack trace',
+      orderToDeliver,
+      hasInvoiceFile: !!invoiceFile,
+      invoiceFileDetails: invoiceFile ? {
+        name: invoiceFile.name,
+        size: invoiceFile.size,
+        type: invoiceFile.type
+      } : null
+    });
+    
+    // Message d'erreur utilisateur
+    let userMessage = "Impossible de mettre à jour le statut de la commande";
+    if (err instanceof Error) {
+      userMessage = err.message;
+    }
+    
+    toast.error(userMessage);
+    
   } finally {
+    // Nettoyage final
     setProcessingOrder(null);
     setDeliveryModal(false);
     setOrderToDeliver(null);
@@ -262,116 +400,45 @@ const deliverOrder = async () => {
   }
 };
 
-// Option 2: Si votre API ne peut gérer que du JSON, vous devrez convertir le fichier en base64
-const deliverOrderWithBase64 = async () => {
-  if (!orderToDeliver) return;
+// Fonction alternative avec retry automatique
+const deliverOrderWithRetry = async (maxRetries = 2) => {
+  let attempt = 0;
+  
+  while (attempt <= maxRetries) {
+    try {
+      await deliverOrder();
+      return; // Succès, sortir de la boucle
+    } catch (error) {
+      attempt++;
+      console.log(`Tentative ${attempt} échouée:`, error);
+      
+      if (attempt <= maxRetries) {
+        // Attendre avant de retry (délai exponentiel)
+        const delay = Math.pow(2, attempt) * 1000; // 2s, 4s, 8s...
+        console.log(`Retry dans ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      } else {
+        // Dernière tentative échouée
+        throw error;
+      }
+    }
+  }
+};
+
+// Fonction pour debug - à utiliser temporairement
+const debugDeliverOrder = async () => {
+  console.log("=== DEBUG: Début de la livraison ===");
+  console.log("orderToDeliver:", orderToDeliver);
+  console.log("invoiceFile:", invoiceFile);
+  console.log("returnedOrders length:", returnedOrders.length);
   
   try {
-    setProcessingOrder(orderToDeliver);
-    
-    // Typer correctement l'objet de requête
-    let requestBody: {
-      statut: string;
-      facture?: {
-        data: string;
-        name: string;
-        type: string;
-      };
-    } = {
-      statut: "LIVREE"
-    };
-    
-    if (invoiceFile) {
-      console.log("Frontend file details:", {
-        name: invoiceFile.name,
-        size: invoiceFile.size,
-        type: invoiceFile.type,
-        lastModified: invoiceFile.lastModified,
-      });
-      
-      if (invoiceFile.size === 0) {
-        toast.error("Le fichier facture est vide");
-        return;
-      }
-      if (invoiceFile.type !== "application/pdf") {
-        toast.error("Veuillez sélectionner un fichier PDF valide");
-        return;
-      }
-      
-      // Convertir le fichier en base64
-      try {
-        const base64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const result = reader.result;
-            if (typeof result === 'string') {
-              resolve(result.split(',')[1]); // Enlever le préfixe data:
-            } else {
-              reject(new Error('Erreur de lecture du fichier'));
-            }
-          };
-          reader.onerror = reject;
-          reader.readAsDataURL(invoiceFile);
-        });
-        
-        requestBody.facture = {
-          data: base64,
-          name: invoiceFile.name,
-          type: invoiceFile.type
-        };
-      } catch (readError) {
-        console.error("Error reading file:", readError);
-        toast.error("Impossible de lire le fichier sélectionné");
-        return;
-      }
-    }
-
-    const response = await fetch(`/api/magasinier/commandes/commandes-en-attente/${orderToDeliver}/status`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(requestBody),
-    });
-
-    if (!response.ok) {
-      let errorData;
-      try {
-        errorData = await response.json();
-      } catch (jsonError) {
-        const textResponse = await response.text();
-        console.error("Non-JSON error response:", textResponse);
-        throw new Error(`Erreur serveur: ${response.status} - ${textResponse}`);
-      }
-      throw new Error(errorData.error || errorData.message || `Erreur ${response.status}`);
-    }
-
-    const result = await response.json();
-    console.log("Success response:", result);
-
-    // Reste du code de gestion du succès...
-    const order = returnedOrders.find((o) => o.id === orderToDeliver);
-    if (order && order.produits.length > 0) {
-      const productIds = order.produits.map((item) => item.produit.id);
-      const description = `Commande ${order.id.substring(0, 8)}... livrée. Produits: ${order.produits
-        .map((item) => `${item.produit.nom} (Quantité: ${item.quantite})`)
-        .join(", ")}`;
-      await logRegistryAction(productIds, "COMMANDE_LIVREE", description);
-    }
-
-    const updatedOrders = returnedOrders.filter((order) => order.id !== orderToDeliver);
-    setReturnedOrders(updatedOrders);
-    updateFilteredOrders(orderToDeliver);
-    toast.success("Commande marquée comme livrée. Quantités de produits mises à jour !");
-    
-  } catch (err) {
-    console.error("Erreur lors de la livraison de la commande:", err);
-    toast.error(err instanceof Error ? err.message : "Impossible de mettre à jour le statut de la commande");
-  } finally {
-    setProcessingOrder(null);
-    setDeliveryModal(false);
-    setOrderToDeliver(null);
-    resetFileInput();
+    await deliverOrder();
+    console.log("=== DEBUG: Livraison réussie ===");
+  } catch (error) {
+    console.log("=== DEBUG: Erreur de livraison ===");
+    console.error(error);
+    throw error;
   }
 };
   const updateOrderStatus = async (orderId: string, newStatus: string, raisonRetour?: string) => {
