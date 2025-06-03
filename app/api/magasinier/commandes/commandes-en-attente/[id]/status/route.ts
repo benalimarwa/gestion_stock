@@ -137,203 +137,108 @@ async function saveFileToSystem(file: File, commande: any): Promise<string> {
     throw error;
   }
 }
-
+// Version de test temporaire - remplacez votre fonction PUT par celle-ci
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  let savedFilePath: string | undefined;
-  
   try {
     const { id } = await params;
+    console.log("=== TEST VERSION ===");
+    console.log("Order ID:", id);
+    console.log("Process CWD:", process.cwd());
+    console.log("Node version:", process.version);
+    console.log("Platform:", process.platform);
 
     // Parse FormData
     const formData = await request.formData();
     const statutInput = formData.get("statut") as string;
-    const raisonRetour = formData.get("raisonRetour") as string | null;
     const factureFile = formData.get("facture") as File | null;
 
-    console.log("Form data received:", {
-      statut: statutInput,
-      raisonRetour,
-      hasFacture: !!factureFile,
-      factureName: factureFile?.name,
-      factureSize: factureFile?.size,
-      factureType: factureFile?.type,
-    });
+    console.log("Status:", statutInput);
+    console.log("Has file:", !!factureFile);
 
-    // Validation du statut
-    const validStatuts: StatutCommande[] = [
-      StatutCommande.LIVREE,
-      StatutCommande.EN_RETOUR,
-      StatutCommande.ANNULEE,
-    ];
+    if (factureFile) {
+      console.log("File details:", {
+        name: factureFile.name,
+        size: factureFile.size,
+        type: factureFile.type
+      });
 
-    if (!statutInput || !Object.values(StatutCommande).includes(statutInput as StatutCommande)) {
-      return NextResponse.json(
-        { error: "Statut de commande non valide" },
-        { status: 400 }
-      );
+      // Test simple d'écriture dans le dossier temporaire
+      const os = require('os');
+      const tempDir = os.tmpdir();
+      const testPath = path.join(tempDir, `test-${Date.now()}.pdf`);
+      
+      console.log("Testing write to temp:", testPath);
+      
+      try {
+        const buffer = Buffer.from(await factureFile.arrayBuffer());
+        await writeFile(testPath, buffer);
+        console.log("✅ Temp write successful");
+        
+        // Nettoyage
+        await unlink(testPath);
+        console.log("✅ Temp file cleaned up");
+        
+        // Maintenant tester dans public
+        const publicDir = path.join(process.cwd(), "public");
+        const facturesDir = path.join(publicDir, "factures");
+        
+        console.log("Public dir:", publicDir);
+        console.log("Factures dir:", facturesDir);
+        
+        // Créer le dossier
+        await mkdir(facturesDir, { recursive: true });
+        console.log("✅ Directory created/exists");
+        
+        // Écrire le fichier
+        const finalPath = path.join(facturesDir, `test-${Date.now()}.pdf`);
+        await writeFile(finalPath, buffer);
+        console.log("✅ File written to public/factures");
+        
+        // Pour ce test, on ne supprime pas le fichier pour vérification
+        
+        return NextResponse.json({
+          success: true,
+          message: "Test réussi - fichier sauvegardé",
+          testPath: finalPath
+        });
+        
+      } catch (fileError) {
+        console.error("❌ File operation failed:", fileError);
+        return NextResponse.json({
+          error: "Test d'écriture échoué",
+          details: fileError instanceof Error ? fileError.message : String(fileError)
+        }, { status: 500 });
+      }
     }
 
-    const statut = statutInput as StatutCommande;
-    if (!validStatuts.includes(statut)) {
-      return NextResponse.json(
-        { error: "Statut de commande non autorisé pour cette mise à jour" },
-        { status: 400 }
-      );
-    }
-
-    // Récupérer la commande
+    // Si pas de fichier, juste tester la mise à jour du statut
     const commande = await prisma.commande.findUnique({
-      where: { id },
-      include: {
-        produits: {
-          include: {
-            produit: true,
-          },
-        },
-      },
+      where: { id }
     });
 
     if (!commande) {
-      return NextResponse.json(
-        { error: "Commande non trouvée" },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Commande non trouvée" }, { status: 404 });
     }
 
-    // Préparer les données de mise à jour
-    const updateData: {
-      statut: StatutCommande;
-      facture?: string;
-      dateLivraison?: Date;
-      raisonRetour?: string | null;
-    } = { statut };
-
-    // Traitement du fichier facture
-    if (factureFile && statut === StatutCommande.LIVREE) {
-      console.log("Processing invoice file...");
-      
-      // Validation du fichier
-      const validation = isValidPdfFile(factureFile);
-      if (!validation.isValid) {
-        return NextResponse.json(
-          { error: validation.error },
-          { status: 400 }
-        );
-      }
-
-      try {
-        // Sauvegarder le fichier
-        const facturePath = await saveFileToSystem(factureFile, commande);
-        updateData.facture = facturePath;
-        
-        // Stocker le chemin pour nettoyage en cas d'erreur
-        savedFilePath = path.join(process.cwd(), "public", facturePath);
-        
-        console.log("Invoice file processed successfully:", facturePath);
-        
-      } catch (fileError) {
-        console.error("Erreur lors du traitement de la facture:", fileError);
-        return NextResponse.json(
-          {
-            error: "Erreur lors de l'enregistrement de la facture",
-            details: fileError instanceof Error ? fileError.message : String(fileError),
-          },
-          { status: 500 }
-        );
-      }
-    }
-
-    // Mise à jour dans une transaction
-    const updatedOrder = await prisma.$transaction(async (tx) => {
-      if (statut === StatutCommande.LIVREE) {
-        updateData.dateLivraison = new Date();
-
-        // Mise à jour des stocks
-        for (const item of commande.produits) {
-          const produit = await tx.produit.findUnique({
-            where: { id: item.produitId },
-          });
-
-          if (produit) {
-            const nouvelleQuantite = produit.quantite + item.quantite;
-            let nouveauStatut: StatutProduit;
-            
-            if (nouvelleQuantite === 0) {
-              nouveauStatut = StatutProduit.RUPTURE;
-            } else if (nouvelleQuantite <= produit.quantiteMinimale) {
-              nouveauStatut = StatutProduit.CRITIQUE;
-            } else {
-              nouveauStatut = StatutProduit.NORMALE;
-            }
-
-            await tx.produit.update({
-              where: { id: item.produitId },
-              data: {
-                quantite: nouvelleQuantite,
-                statut: nouveauStatut,
-              },
-            });
-
-            console.log(`Produit ${item.produitId} mis à jour: ${produit.quantite} + ${item.quantite} = ${nouvelleQuantite}, statut: ${nouveauStatut}`);
-          }
-        }
-      }
-
-      if (statut === StatutCommande.EN_RETOUR) {
-        if (!raisonRetour) {
-          throw new Error("La raison du retour est requise");
-        }
-        updateData.raisonRetour = raisonRetour;
-        console.log("Raison du retour:", raisonRetour);
-      }
-
-      return tx.commande.update({
-        where: { id },
-        data: updateData,
-        include: {
-          fournisseur: true,
-          produits: {
-            include: {
-              produit: true,
-            },
-          },
-        },
-      });
+    const updatedOrder = await prisma.commande.update({
+      where: { id },
+      data: { statut: statutInput as StatutCommande }
     });
-
-    console.log("Commande mise à jour avec succès:", updatedOrder.id);
 
     return NextResponse.json({
       success: true,
       data: updatedOrder,
-      message: "Commande mise à jour avec succès",
+      message: "Statut mis à jour (sans fichier)"
     });
 
   } catch (error) {
-    console.error("Erreur générale lors de la mise à jour:", {
-      message: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-    });
-    
-    // Nettoyage du fichier en cas d'erreur
-    if (savedFilePath) {
-      try {
-        await unlink(savedFilePath);
-        console.log("Cleaned up file after error:", savedFilePath);
-      } catch (unlinkError) {
-        console.error("Failed to clean up file:", unlinkError);
-      }
-    }
-    
-    return NextResponse.json(
-      {
-        error: "Erreur lors de la mise à jour du statut de commande",
-        details: error instanceof Error ? error.message : "Erreur inconnue",
-      },
-      { status: 500 }
-    );
+    console.error("❌ Test error:", error);
+    return NextResponse.json({
+      error: "Erreur de test",
+      details: error instanceof Error ? error.message : String(error)
+    }, { status: 500 });
   }
 }
