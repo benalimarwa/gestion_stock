@@ -1,16 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/db";
-import { writeFile, mkdir } from "fs/promises";
+import { writeFile, mkdir, unlink } from "fs/promises";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { StatutProduit, StatutCommande } from "@prisma/client";
 
-async function ensureDirectoryExists(dir: string) {
+async function ensureDirectoryExists(dir: string): Promise<void> {
   try {
     await mkdir(dir, { recursive: true });
-    console.log(`Directory ${dir} ensured or created`);
+    console.log(`Directory ensured: ${dir}`);
   } catch (error) {
-    console.error(`Failed to create directory ${dir}:`, error);
+    console.error(`Failed to create directory ${dir}:`, {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
     throw new Error(`Unable to create directory ${dir}: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }
@@ -19,6 +22,7 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  let savedFilePath: string | undefined; // Declare at function scope
   try {
     const { id } = await params;
 
@@ -119,37 +123,44 @@ export async function PUT(
         );
       }
 
+      // Define storage directory
+      const facturesDir = path.join(process.cwd(), "public", "factures");
       try {
-        // Define storage directory
-        const facturesDir = path.join(process.cwd(), "public", "Uploads", "factures");
+        console.log("Ensuring directory exists:", facturesDir);
         await ensureDirectoryExists(facturesDir);
 
         // Generate unique filename
         const timestamp = Date.now();
         const fileName = `facture-${commande.id}-${timestamp}-${uuidv4()}.pdf`;
-        const filePath = path.join(facturesDir, fileName);
-        const facturePath = `/Uploads/factures/${fileName}`;
+        savedFilePath = path.join(facturesDir, fileName);
+        const facturePath = `/factures/${fileName}`;
 
-        console.log("File paths:", { facturesDir, fileName, filePath, facturePath });
+        console.log("File paths:", { facturesDir, fileName, savedFilePath, facturePath });
 
         // Save file
+        console.log("Converting file to buffer...");
         const arrayBuffer = await factureFile.arrayBuffer();
         const fileBuffer = Buffer.from(arrayBuffer);
 
         if (fileBuffer.length === 0) {
           throw new Error("Buffer vide après conversion");
         }
+        console.log("Buffer created, size:", fileBuffer.length);
 
-        await writeFile(filePath, fileBuffer);
-        console.log("File written successfully to:", filePath);
+        console.log("Writing file to:", savedFilePath);
+        await writeFile(savedFilePath, fileBuffer);
+        console.log("File written successfully");
 
         updateData.facture = facturePath;
       } catch (fileError) {
         console.error("Erreur détaillée lors du traitement du fichier:", {
-          error: fileError,
           message: fileError instanceof Error ? fileError.message : String(fileError),
           stack: fileError instanceof Error ? fileError.stack : undefined,
-          facturesDir: path.join(process.cwd(), "public", "Uploads", "factures"),
+          facturesDir,
+          savedFilePath,
+          factureName: factureFile.name,
+          factureSize: factureFile.size,
+          factureType: factureFile.type,
         });
         return NextResponse.json(
           {
@@ -161,7 +172,7 @@ export async function PUT(
       }
     }
 
-    // Handle delivery (LIVREE)
+    // Update in transaction
     const updatedOrder = await prisma.$transaction(async (tx) => {
       if (statut === StatutCommande.LIVREE) {
         updateData.dateLivraison = new Date();
@@ -195,7 +206,6 @@ export async function PUT(
         }
       }
 
-      // Handle return (EN_RETOUR)
       if (statut === StatutCommande.EN_RETOUR) {
         if (!raisonRetour) {
           throw new Error("La raison du retour est requise");
@@ -204,7 +214,6 @@ export async function PUT(
         console.log("Raison du retour:", raisonRetour);
       }
 
-      // Update the commande
       return tx.commande.update({
         where: { id },
         data: updateData,
@@ -229,10 +238,18 @@ export async function PUT(
 
   } catch (error) {
     console.error("Erreur générale lors de la mise à jour:", {
-      error,
       message: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined,
     });
+    // Cleanup saved file if it exists
+    if (savedFilePath) {
+      try {
+        await unlink(savedFilePath);
+        console.log("Cleaned up file:", savedFilePath);
+      } catch (unlinkError) {
+        console.error("Failed to clean up file:", unlinkError);
+      }
+    }
     return NextResponse.json(
       {
         error: "Erreur lors de la mise à jour du statut de commande",
