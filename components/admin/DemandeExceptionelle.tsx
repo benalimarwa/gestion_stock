@@ -274,7 +274,7 @@ export function PendingExceptionalRequestsTable() {
       const payload = { status, ...(raisonRefus && { raisonRefus }) };
       console.log(`Sending PATCH request to ${API_BASE_PATH}/${requestId}/accept with payload:`, payload);
 
-      const response = await fetch(`${API_BASE_PATH}/${requestId}/reject`, {
+      const response = await fetch(`${API_BASE_PATH}/${requestId}/accept`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
