@@ -1,38 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/db";
 import { currentUser } from "@clerk/nextjs/server";
-import { PrismaClient, Prisma } from "@prisma/client";
-
-// Define types for better type safety
-type LowStockProduct = {
-  id: string;
-  nom: string;
-  marque: string | null;
-  quantite: number;
-  quantiteMinimale: number;
-};
-
-type RuptureProduct = {
-  id: string;
-  nom: string;
-  marque: string | null;
-  quantite: number;
-};
-
-type TransactionResult = {
-  lowStockProducts: LowStockProduct[];
-  ruptureProducts: RuptureProduct[];
-};
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  let demandeId: string = ''; // Declare outside try-catch block
-  
   try {
-    const { id } = await params;
-    demandeId = id; // Assign the value here
+    const {id:demandeId }= await params;
     const user = await currentUser();
 
     // Vérifications d'authentification
@@ -88,7 +63,7 @@ export async function POST(
     }
 
     // Utiliser une transaction pour garantir l'intégrité des données
-    const result = await prisma.$transaction(async (prismaClient: Prisma.TransactionClient): Promise<TransactionResult> => {
+    const result = await prisma.$transaction(async (prismaClient) => {
       // 1. Mettre à jour le statut de la demande
       console.log("Updating demand status to PRISE:", demandeId);
       await prismaClient.demande.update({
@@ -97,8 +72,8 @@ export async function POST(
       });
 
       // 2. Mettre à jour les stocks et détecter les alertes
-      const lowStockProducts: LowStockProduct[] = [];
-      const ruptureProducts: RuptureProduct[] = [];
+      const lowStockProducts: any[] = [];
+      const ruptureProducts: any[] = [];
 
       for (const demandeProduit of demande.produits) {
         const produit = demandeProduit.produit;
@@ -168,16 +143,18 @@ export async function POST(
       return { lowStockProducts, ruptureProducts };
     });
 
+   
     return NextResponse.json({
       success: true,
       message: "Demande traitée avec succès",
+     
     });
 
   } catch (error) {
     console.error("Erreur lors du traitement de la demande:", {
       error: error instanceof Error ? error.message : "Unknown error",
       stack: error instanceof Error ? error.stack : undefined,
-      demandeId: demandeId, // Now accessible here
+     
     });
     return NextResponse.json(
       {
