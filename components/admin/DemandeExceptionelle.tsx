@@ -271,14 +271,14 @@ export function PendingExceptionalRequestsTable() {
     setProcessingRequests((prev) => new Set(prev).add(requestId));
 
     try {
-      const payload = { status, ...(raisonRefus && { raisonRefus }) };
-      console.log(`Sending PATCH request to ${API_BASE_PATH}/${requestId}/accept with payload:`, payload);
+    
+    
 
       const response = await fetch(`${API_BASE_PATH}/${requestId}/accept`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify(payload),
+   
       });
 
       const headers = Object.fromEntries(response.headers.entries());
