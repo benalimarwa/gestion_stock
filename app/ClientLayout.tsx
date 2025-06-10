@@ -24,6 +24,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
     } else if (user) {
       const fetchRoleWithRetry = async (retries = 3, delay = 1000): Promise<void> => {
         try {
+          //Récupère l’adresse email principale de l'utilisateur
           const email = user.primaryEmailAddress?.emailAddress;
           if (!email) {
             console.error("No primary email found for user:", user.id);
@@ -80,7 +81,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
       const redirectPath = redirectMap[role.toUpperCase()] || "/";
       console.log("Redirecting based on role:", role, "to:", redirectPath);
 
-      // Check if the current path is allowed for the user's role
+      // roleRouteMap : règles de sécurité – chaque rôle n’a accès qu’à son propre chemin (par exemple /admin/...).
       const roleRouteMap: Record<string, RegExp> = {
         ADMIN: /^\/admin(\/.*)?$/,
         MAGASINNIER: /^\/magasinier(\/.*)?$/,

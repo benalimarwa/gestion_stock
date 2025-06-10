@@ -14,7 +14,7 @@ model User {
   clerkUserId       String?        @unique
   email             String         @unique
   name              String?
-  role              Role           @default(ADMIN)
+  role              Role           
   status            UserStatus     @default(ACTIVE)
   previousRole      Role?    
   createdAt         DateTime       @default(now())
